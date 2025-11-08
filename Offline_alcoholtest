@@ -1,0 +1,1934 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob: 'unsafe-inline' https:; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:;">
+    <title>Offline Attendance Logger</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .container { max-width: 900px; }
+        .card {
+            background-color: #ffffff;
+            border-radius: 1.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+            padding: 2rem;
+        }
+        .table-container { overflow-x: auto; }
+        /* Adjusted input focus styles */
+        #employeeIdInput:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37,99,235,0.5);
+        }
+        .fade-in { animation: fadeIn 0.5s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px);} to { opacity:1; transform:translateY(0);} }
+        .autocomplete-list-item { padding: 0.5rem 1rem; cursor:pointer; transition: background-color .2s; }
+        .autocomplete-list-item:hover { background-color: #f3f4f6; }
+        .modal { display:none; position:fixed; z-index:100; left:0; top:0; width:100%; height:100%; background-color: rgba(0,0,0,0.5); justify-content:center; align-items:center; }
+        .modal-content { background-color:#fff; padding:2rem; border-radius:1rem; box-shadow:0 4px 6px rgba(0,0,0,0.1); width:90%; max-width:400px; }
+        @keyframes pulse { 0%,100%{ transform:scale(1); color:#2563eb;} 50% { transform:scale(1.2); color:#1d4ed8; } }
+        .pulse { animation: pulse 0.4s ease-in-out; }
+        /* File protocol overlay styles remain */
+        #fileProtocolOverlay {
+            display: none;
+            position: fixed;
+            z-index: 9999;
+            inset: 0;
+            background: linear-gradient(0deg, rgba(0,0,0,0.6), rgba(0,0,0,0.6));
+            color: #fff;
+            padding: 2rem;
+            backdrop-filter: blur(4px);
+        }
+        #fileProtocolOverlay .box {
+            max-width: 720px;
+            margin: 3rem auto;
+            background: rgba(0,0,0,0.45);
+            border-radius: 12px;
+            padding: 1.25rem;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+    <div id="fileProtocolOverlay" class="flex items-center justify-center">
+        <div class="box">
+            <h2 class="text-2xl font-bold mb-2">iOS Local File Notice</h2>
+            <p class="mb-3">iOS Safari (and Chrome on iOS) sometimes block scripts when an HTML file is opened directly with the <code>file://</code> protocol. If the app looks broken, please open it in Safari, then choose **Add to Home Screen**, and launch from there.</p>
+            <ol class="list-decimal list-inside mb-3">
+                <li>**Mode:** This app is operating as a **Simple Attendance Logger**.</li>
+                <li>**Input:** Use an external **RFID reader** or scan/type the **Employee ID**.</li>
+            </ol>
+            <div class="mt-4 text-right">
+                <button id="continueAnyway" class="px-4 py-2 bg-blue-600 rounded text-white">Continue Anyway</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container mx-auto">
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-blue-700 tracking-tight">Offline Attendance Logger</h1>
+            <p class="mt-2 text-lg text-gray-600">Scan or Enter Employee ID to Log Attendance.</p>
+            <div id="currentDateTime" class="mt-4 text-sm text-gray-500"></div>
+        </div>
+
+        <div class="card p-6 mt-6 max-w-lg mx-auto">
+            <h2 class="text-2xl font-bold mb-4 text-center">Employee Lookup</h2>
+            <div class="relative mb-4">
+                <input type="text" id="employeeSearchInput" placeholder="Search by name or ID" class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors">
+                <ul id="employeeSuggestions" class="absolute z-10 w-full bg-white border border-gray-300 rounded-md mt-1 max-h-40 overflow-y-auto hidden"></ul>
+            </div>
+            <div id="searchResultCard" class="hidden border rounded-md p-4">
+                <div class="flex items-center mb-2">
+                    <h3 class="font-semibold text-lg" id="searchResultName"></h3>
+                </div>
+                <p class="text-sm text-gray-600">**ID:** <span id="searchResultId"></span></p>
+                <p class="text-sm text-gray-600">**Department:** <span id="searchResultDepartment"></span></p>
+            </div>
+        </div>
+
+        <div id="attendanceCard" class="card mb-8">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-4 border-b pb-2">Record Attendance</h2>
+            <div class="flex flex-col md:flex-row items-center space-y-4 md:space-y-0 md:space-x-4">
+                <div class="flex-grow w-full">
+                    <label for="employeeIdInput" class="block text-sm font-medium text-gray-700 mb-1">Employee ID (RFID Scan)</label>
+                    <input type="text" id="employeeIdInput" placeholder="Enter Employee ID..." class="w-full px-4 py-2 text-lg border-2 border-blue-500 rounded-xl focus:ring-2 focus:ring-blue-700 transition-colors duration-200" autofocus required>
+                </div>
+            </div>
+            <div class="flex space-x-4 mt-4">
+                <button id="recordAttendanceBtn" class="flex-1 px-6 py-3 bg-blue-600 text-white font-bold rounded-xl shadow hover:bg-blue-700 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2">Log Attendance</button>
+                <button id="extractBtn" class="w-full md:w-auto px-6 py-3 bg-green-500 text-white font-bold rounded-xl shadow hover:bg-green-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2">Extract Log (CSV)</button>
+                <button id="resetBtn" class="w-full md:w-auto px-6 py-3 bg-red-500 text-white font-bold rounded-xl shadow hover:bg-red-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2">Clear Log</button>
+            </div>
+            <div class="mt-4 text-center">
+                <label for="employeeDataUpload" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-gray-500 hover:bg-gray-600 cursor-pointer">Upload Employee List (JSON/JS)</label>
+                <input type="file" id="employeeDataUpload" accept=".js,.json,text/javascript" class="hidden">
+            </div>
+        </div>
+
+        <div id="resultCard" class="card hidden mb-8 fade-in border-4 border-green-500">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-4 border-b pb-2 text-center">Attendance Recorded!</h2>
+            <div class="flex flex-col items-center justify-center text-center">
+                <p id="resultName" class="text-xl font-bold text-gray-900 mb-1"></p>
+                <p id="resultDepartment" class="text-lg font-medium text-gray-700 mb-4"></p>
+                <div>
+                    <p class="text-8xl font-extrabold pulse text-green-600" id="resultStatus">LOGGED</p>
+                </div>
+                <p id="resultDateTime" class="text-lg font-medium text-gray-700 mt-2"></p>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-4 border-b pb-2">Attendance Log</h2>
+
+            <div id="totalScannedContainer" class="mb-4 text-lg font-semibold text-blue-600">Total Logs: <span id="totalScanned">0</span></div>
+
+            <div class="table-container">
+                <table id="attendanceTable" class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Department</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200" id="attendanceBody"></tbody>
+                </table>
+            </div>
+            <div id="noRecordsMessage" class="mt-4 text-center text-gray-500 hidden">No attendance records yet.</div>
+        </div>
+    </div>
+
+    <div id="confirmModal" class="modal">
+        <div class="modal-content">
+            <h3 class="text-xl font-bold mb-4">Confirm Clear Log</h3>
+            <p class="text-gray-700 mb-6">Are you sure you want to clear all attendance records? This action cannot be undone.</p>
+            <div class="flex justify-end space-x-4">
+                <button id="cancelClearBtn" class="px-4 py-2 bg-gray-300 text-gray-800 font-bold rounded-xl hover:bg-gray-400 transition-colors duration-200">Cancel</button>
+                <button id="confirmClearBtn" class="px-4 py-2 bg-red-500 text-white font-bold rounded-xl hover:bg-red-600 transition-colors duration-200">Clear</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    "use strict";
+
+    /*******************************
+     * Safe storage wrapper
+     *******************************/
+    function safeStorage() {
+        try {
+            const testKey = '__storage_test__';
+            localStorage.setItem(testKey, testKey);
+            localStorage.removeItem(testKey);
+            return {
+                getItem: (k) => localStorage.getItem(k),
+                setItem: (k, v) => localStorage.setItem(k, v),
+                removeItem: (k) => localStorage.removeItem(k),
+            };
+        } catch (e) {
+            const memory = {};
+            return {
+                getItem: (k) => (memory.hasOwnProperty(k) ? memory[k] : null),
+                setItem: (k, v) => { memory[k] = String(v); },
+                removeItem: (k) => { delete memory[k]; },
+            };
+        }
+    }
+
+    const storage = safeStorage();
+
+    /*******************************
+     * Keys & data
+     *******************************/
+    const EMPLOYEE_DATA_KEY = 'employeeDataAttendance';
+    const ATTENDANCE_RECORDS_KEY = 'attendanceRecords';
+    let employeeData = new Map([
+      ["10898184", { name: "ACBO, MYLENE", department: "ADMIN" }],
+["11029109", { name: "AOAS, ARLENE", department: "ADMIN" }],
+["6608841", { name: "CARRIEDO, CHRISTIAN", department: "OHN" }],
+["4645808", { name: "NANO, MYLENE", department: "ADMIN" }],
+["4781248", { name: "SOLANO, RONNIE", department: "ADMIN" }],
+["3365045", { name: "ABELA, ALDRIN", department: "ASSAY" }],
+["10862857", { name: "ABON, RODNEY", department: "ASSAY" }],
+["3311939", { name: "ALIE, ABDURASID", department: "ASSAY" }],
+["10916942", { name: "ALIT, JUAN MIGUEL", department: "ASSAY" }],
+["3556346", { name: "AMEROLL, ADSMAN", department: "ASSAY" }],
+["10862854", { name: "BACALLA, BRYAN", department: "ASSAY" }],
+["10894182", { name: "BALADJAY, NHELOU", department: "ASSAY" }],
+["3316599", { name: "CORPUZ, JONATHAN", department: "ASSAY" }],
+["222222", { name: "DAPITAN, KEVIN", department: "ASSAY" }],
+["10894296", { name: "DAYONDON, NOLIE", department: "ASSAY" }],
+["4674839", { name: "DAYONDON, ROY", department: "ASSAY" }],
+["12129846", { name: "DE GUZMAN, JOMAR", department: "ASSAY" }],
+["3240461", { name: "DELA  CRUZ, RAMIL", department: "ASSAY" }],
+["1356259", { name: "DEOCARES, JEROLD", department: "ASSAY" }],
+["1111111", { name: "DINO, MUHAMMAD NUR", department: "ASSAY" }],
+["1377737", { name: "EGE, RICHARD", department: "ASSAY" }],
+["11044514", { name: "ELEAZAR, DANTE", department: "ASSAY" }],
+["4674861", { name: "ESCALANTE, RONNIE", department: "ASSAY" }],
+["9812194", { name: "GALBUN, ISSA", department: "ASSAY" }],
+["3254398", { name: "GARCI, ABNER JAMES", department: "ASSAY" }],
+["11085381", { name: "GONZAGA, IDA BELLA", department: "ASSAY" }],
+["10862835", { name: "GUALON, ERIC", department: "ASSAY" }],
+["1412530", { name: "JUARIO, JOHN PETER", department: "ASSAY" }],
+["15050792", { name: "LANZADERAS, ARMAN", department: "ASSAY" }],
+["3403098", { name: "LASAPIN, RAYMUND P.", department: "ASSAY" }],
+["3516782", { name: "LOCSIN, NOEL", department: "ASSAY" }],
+["3566451", { name: "MELLIAN, ABDULHASAN", department: "ASSAY" }],
+["12123848", { name: "MELOCOTONES, JOHN", department: "ASSAY" }],
+["3557376", { name: "MOLEJON, RYAN RUZZEL", department: "ASSAY" }],
+["3323159", { name: "MONTESINO, MARVIN", department: "ASSAY" }],
+["12130226", { name: "MOSLARES, EDWARD", department: "ASSAY" }],
+["10916962", { name: "PATA, MILAHAM", department: "ASSAY" }],
+["5791295", { name: "RAFOLS, ALFON JAY", department: "ASSAY" }],
+["3398978", { name: "DELA CRUZ, RAMIL", department: "ASSAY" }],
+["9812169", { name: "RENO, CHRISTOPHER", department: "ASSAY" }],
+["6600604", { name: "RIOVEROS,  GERALDINE", department: "ASSAY" }],
+["12124052", { name: "ROBLES, PAULO", department: "ASSAY" }],
+["3404455", { name: "SACLUTI, SHARLENE NOLLIDO", department: "ASSAY" }],
+["11019476", { name: "SEBALLOS, RUEL", department: "ASSAY" }],
+["5791304", { name: "SUMANOY, RICA", department: "ASSAY" }],
+["3399716", { name: "SURAIM, NICKSON", department: "ASSAY" }],
+["5785610", { name: "SUSUSCO, BRYAN KEITH", department: "ASSAY" }],
+["1377590", { name: "TAYACTAC, JOSE", department: "ASSAY" }],
+["10894323", { name: "TUY, ROMEO JR.", department: "ASSAY" }],
+["11043150", { name: "VILLAREAL, CRIS", department: "ASSAY" }],
+["10507748", { name: "ABDULHALIK, NURIDAN", department: "BARGE LOADING-MADRID" }],
+["9793302", { name: "ABELARDO, JAYSON", department: "BARGE LOADING-RONEX" }],
+["6599912", { name: "GUJELDE, ADRIAN", department: "BARGE LOADING-MADRID" }],
+["3736656", { name: "AGUIRRE, ANGIE BOY", department: "BARGE LOADING" }],
+["11045348", { name: "ALVAREZ, CESAR", department: "BARGE LOADING-RONEX" }],
+["10507785", { name: "ANDRIN, WILMER", department: "BARGE LOADING-RONEX" }],
+["1363570", { name: "ASKALIE, SARICAL", department: "BARGE LOADING-RONEX" }],
+["9716531", { name: "BADILLES, RENANTE", department: "BARGE LOADING-RONEX" }],
+["10887744", { name: "BALDAZANO, CARLO", department: "BARGE LOADING-MADRID" }],
+["9811706", { name: "BANADERA, ROMEO", department: "BARGE LOADING-RONEX" }],
+["10872703", { name: "BAYSA, JERAMEL", department: "BARGE LOADING-RONEX" }],
+["1366813", { name: "BELGICA, LUIS JR", department: "BARGE LOADING" }],
+["5810747", { name: "BESALEZ, AREX", department: "BARGE LOADING-MADRID" }],
+["10907919", { name: "CABOTE, SANDY", department: "BARGE LOADING-RONEX" }],
+["9811709", { name: "CABULAO, ZALDY", department: "BARGE LOADING-RONEX" }],
+["10872730", { name: "CANETE, SAMUEL", department: "BARGE LOADING-MADRID" }],
+["10896748", { name: "COLA, RONALD", department: "BARGE LOADING-RONEX" }],
+["14911743", { name: "COMPESINO, WINKY", department: "BARGE LOADING-RONEX" }],
+["14894948", { name: "DAGOT, RODEL", department: "BARGE LOADING-RONEX" }],
+["11042094", { name: "DELA VEGA, STANLY", department: "BENEFICIATION-STANLY" }],
+["11042571", { name: "DELOS REYES, GIOVANNIE", department: "BARGE LOADING-RONEX" }],
+["9743324", { name: "GABINETE, ALLIO", department: "BARGE LOADING-RONEX" }],
+["9853688", { name: "ILUSTRISIMO, NELSON", department: "BARGE LOADING-RONEX" }],
+["5800576", { name: "ISMAEL, FAIZAL", department: "BARGE LOADING-MADRID" }],
+["10489054", { name: "ISMAEL, JUHAIRE", department: "BARGE LOADING-RONEX" }],
+["9815245", { name: "ISMAIL, SAMSARANI", department: "BARGE LOADING-RONEX" }],
+["11082092", { name: "JAALI, JULMAN", department: "BARGE LOADING-RONEX" }],
+["3250141", { name: "JALANDONI, JOEL", department: "BARGE LOADING-RONEX" }],
+["5610953", { name: "JANNOL, ALIE", department: "BARGE LOADING-MADRID" }],
+["1328918", { name: "LACIDA, SATURNINO", department: "BARGE LOADING" }],
+["9672858", { name: "LAGRADA, RINANTE", department: "BARGE LOADING-RONEX" }],
+["10866412", { name: "LICUAS, DONATO", department: "PIT-RAUL" }],
+["11058457", { name: "LONGCOP, JOEY", department: "BARGE LOADING-MADRID" }],
+["10896758", { name: "LUCERO, LUSITO", department: "BARGE LOADING-RONEX" }],
+["1331771", { name: "LUCRESIA, JHONIBER", department: "BARGE LOADING-RONEX" }],
+["3455409", { name: "MABASA, JAYPEE S.", department: "BARGE LOADING-RONEX" }],
+["11027230", { name: "MADRID, ANGELITO", department: "BARGE LOADING-MADRID" }],
+["11066690", { name: "MALLARI, JEFFREY", department: "BARGE LOADING-RONEX" }],
+["4650602", { name: "MAMPAWA, DANTE", department: "BARGE LOADING-RONEX" }],
+["11030942", { name: "MARAJAY, DANIEL", department: "BARGE LOADING-MADRID" }],
+["11058424", { name: "MASAGNAY, JOBOY", department: "BARGE LOADING-RONEX" }],
+["10485471", { name: "MONGCAL, EFRAIM", department: "BARGE LOADING-MADRID" }],
+["9853686", { name: "MUHIDDIN, AHMAD S.", department: "BARGE LOADING-RONEX" }],
+["1306573", { name: "ODDIN, DATU AMELBANSA E.", department: "BARGE LOADING-RONEX" }],
+["9671628", { name: "OLPINA, RANDY D.", department: "BARGE LOADING-RONEX" }],
+["9632791", { name: "OQUENDO, RONALD", department: "BARGE LOADING-RONEX" }],
+["10866434", { name: "OREMO, JOSELITO", department: "BARGE LOADING-MADRID" }],
+["3365333", { name: "PARAYAL, JOJO", department: "BARGE LOADING-RONEX" }],
+["3752933", { name: "ROBLES, DARREN S.", department: "BARGE LOADING-RONEX" }],
+["10487777", { name: "RUNES, JONATHAN", department: "BARGE LOADING-RONEX" }],
+["5820194", { name: "SALADAGA, JUNREY", department: "BARGE LOADING-RONEX" }],
+["10799904", { name: "SALI, ABEL", department: "BARGE LOADING-RONEX" }],
+["3720158", { name: "SALVADOR, HONORIO", department: "BARGE LOADING-MADRID" }],
+["9876408", { name: "SAMUDDIN, MATSAN", department: "BENEFICIATION-STANLY" }],
+["11055122", { name: "SAMUDIN, MARSAN", department: "BARGE LOADING-MADRID" }],
+["3763825", { name: "SILVA, JEROME G.", department: "BARGE LOADING-RONEX" }],
+["11058413", { name: "TABARA, JOAQUIN", department: "BARGE LOADING-MADRID" }],
+["11019122", { name: "TAMBALO, WILSON", department: "BARGE LOADING-RONEX" }],
+["9671625", { name: "TANJAY, ALBERTO JR.", department: "BENEFICIATION-STANLY" }],
+["1344556", { name: "TOLENTINO, ARDIE", department: "BARGE LOADING-RONEX" }],
+["9759082", { name: "URDELAS, ORLITO C.", department: "BARGE LOADING-RONEX" }],
+["9815250", { name: "VARGAS, RENIL G.", department: "BARGE LOADING-RONEX" }],
+["10507969", { name: "VENERANDA, JOSHUA", department: "BARGE LOADING" }],
+["11083685", { name: "VIAJEDOR, FELIX", department: "BARGE LOADING-MADRID" }],
+["9852517", { name: "ZAMORA, ZANDRE", department: "BARGE LOADING-RONEX" }],
+["11049846", { name: "ABDULMALIK, ADJID", department: "BARGE LOADING-MADRID" }],
+["1368087", { name: "ABDULPATTA, ISRAN", department: "BENEFICIATION-ROMEL" }],
+["12146538", { name: "ABDURAJAK", department: "BENEFICIATION" }],
+["9632792", { name: "ABEJERO, RONIE", department: "BARGE LOADING-MADRID" }],
+["15054326", { name: "ACAT, ROBERTO", department: "BENEFICIATION-STANLY" }],
+["11030914", { name: "ACLABOL, ABDULLAH", department: "BENEFICIATION" }],
+["11021562", { name: "ADAN, JASON", department: "BENEFICIATION-STANLY" }],
+["11035794", { name: "ADJED, BOYET", department: "BENEFICIATION" }],
+["9639549", { name: "ALIE, TON-TON", department: "BENEFICIATION-STANLY" }],
+["11016428", { name: "ALIPOON, GEORGE", department: "BENEFICIATION" }],
+["3379416", { name: "ALOJAN, KENNETH VICTOR", department: "BENEFICIATION" }],
+["4753164", { name: "AMAR, DANILO", department: "BENEFICIATION" }],
+["3720737", { name: "AMSALI, JUNDI", department: "BENEFICIATION-STANLY" }],
+["11027038", { name: "ANGGI, AL-BENRASHER", department: "BENEFICIATION" }],
+["1346485", { name: "ANICETO, JOVERT", department: "BENEFICIATION" }],
+["9635277", { name: "AREGLADO, JUSUE", department: "BENEFICIATION-STANLY" }],
+["11051765", { name: "ARINEZ, CHARLIE", department: "BARGE LOADING-MADRID" }],
+["9812192", { name: "ASEROL, GELBERT", department: "BENEFICIATION" }],
+["1306579", { name: "BALANAC, HOSNIE", department: "BENEFICIATION" }],
+["11016547", { name: "BALMES, JERRY", department: "BENEFICIATION" }],
+["4671641", { name: "BANADERA, EDWIN", department: "BENEFICIATION-STANLY" }],
+["9759864", { name: "BARRAMEDA, RENATO", department: "BENEFICIATION-STANLY" }],
+["9639553", { name: "BERCE, ARIEL", department: "BENEFICIATION" }],
+["9793305", { name: "BERCE, BONIFACIO", department: "BENEFICIATION" }],
+["10799881", { name: "CAMORA, NOEL", department: "BENEFICIATION" }],
+["11058446", { name: "COLANGGO, JOEL", department: "BENEFICIATION" }],
+["9710757", { name: "COLARAT, DONALD", department: "BENEFICIATION" }],
+["9815249", { name: "CORPUZ, WILLY BOY", department: "BENEFICIATION-STANLY" }],
+["9812190", { name: "COYCOY, DANNY BOY ", department: "BENEFICIATION" }],
+["11045503", { name: "CUDIAMAT, ERNESTO", department: "BENEFICIATION" }],
+["9723951", { name: "DE FELIX, JOEL", department: "BENEFICIATION-STANLY" }],
+["9776899", { name: "DIAMANTE, HARVEY", department: "BARGE LOADING-MADRID" }],
+["11049829", { name: "DIAZ, JERSON H.", department: "BENEFICIATION-STANLY" }],
+["10799842", { name: "DIDIK, NURMAN", department: "BARGE LOADING-MADRID" }],
+["9743325", { name: "DOMINGO, BERNITO", department: "BENEFICIATION-STANLY" }],
+["9853690", { name: "DUNAN, DANILO", department: "BENEFICIATION-STANLY" }],
+["9644601", { name: "ENLONG, BOYET", department: "BENEFICIATION-STANLY" }],
+["1337966", { name: "EPOK, RICHARD", department: "BENEFICIATION-STANLY" }],
+["11077907", { name: "ESCANER, FRANIES", department: "BENEFICIATION-STANLY" }],
+["9811712", { name: "FORONES, JEFFREY A.", department: "BENEFICIATION-STANLY" }],
+["11064015", { name: "FUERTE, JEPOY", department: "BENEFICIATION-STANLY" }],
+["3456167", { name: "GALICIA, ELIAS", department: "BENEFICIATION" }],
+["11083733", { name: "GALIGAO, HELENITO", department: "BENEFICIATION" }],
+["4643138", { name: "GARAY, EDGAR", department: "BENEFICIATION" }],
+["9706710", { name: "HASAN, RENE", department: "BENEFICIATION" }],
+["9853696", { name: "HERNANDEZ, SONNY", department: "BARGE LOADING-RONEX" }],
+["11083564", { name: "IBRAHIM, OMAR", department: "BENEFICIATION-STANLY" }],
+["3299126", { name: "IBRAHIM, ROMY", department: "BENEFICIATION" }],
+["3339692", { name: "JERSON DIAZ", department: "BENEFICIATION" }],
+["9738721", { name: "JORDAN, LITO", department: "BENEFICIATION" }],
+["3348648", { name: "LAWADDIN, BASIL A.", department: "BENEFICIATION" }],
+["11034985", { name: "LLACUNA, ARNULFO", department: "BARGE LOADING-MADRID" }],
+["11030909", { name: "MADRONADO, BENJIE", department: "BARGE LOADING-MADRID" }],
+["9743322", { name: "MAGBANUA JR, ALBERT B.", department: "BENEFICIATION" }],
+["11042008", { name: "MANANES, VICTORINO", department: "BENEFICIATION" }],
+["9759089", { name: "MAWILI, JOHN JOHN R.", department: "BENEFICIATION-STANLY" }],
+["11055144", { name: "MERSAG, LIONARDO", department: "BENEFICIATION" }],
+["11016608", { name: "MONGCAL, GENEFER", department: "BENEFICIATION" }],
+["12127968", { name: "MORALES, CYRIL", department: "BARGE LOADING-MADRID" }],
+["5819073", { name: "MULIAPA, EDLARIN A.", department: "BENEFICIATION-STANLY" }],
+["9763189", { name: "PAGAYANAN, SAMUEL", department: "BENEFICIATION-STANLY" }],
+["15062962", { name: "PARING, DANNY BOY", department: "BARGE LOADING-MADRID" }],
+["11013609", { name: "PFLIEDER, VINCENT MARK", department: "BARGE LOADING-MADRID" }],
+["1329553", { name: "PIS, RAMEL", department: "BENEFICIATION" }],
+["9809704", { name: "RAHIM, JACK.", department: "BENEFICIATION" }],
+["11021122", { name: "ROMERO, RENATO", department: "BARGE LOADING-MADRID" }],
+["4671476", { name: "ROSERO, EDUARDSON", department: "BARGE LOADING-MADRID" }],
+["3555334", { name: "ROYAL, ERIC P.", department: "BENEFICIATION" }],
+["3741951", { name: "SALI, MALGANI U.", department: "BENEFICIATION-STANLY" }],
+["5819062", { name: "SAMDAD, NORNIE U.", department: "BENEFICIATION-STANLY" }],
+["10872772", { name: "SAMUDIN, MATSAN", department: "BARGE LOADING-MADRID" }],
+["9632793", { name: "SERENIO, RONNIE", department: "BENEFICIATION-STANLY" }],
+["6315174", { name: "SERRATO JR, ROBERTO B.", department: "BENEFICIATION" }],
+["11036252", { name: "TAMPALIC, HENSON", department: "BENEFICIATION" }],
+["10896586", { name: "TAN, WELLIE P.", department: "BENEFICIATION" }],
+["12093416", { name: "TURINGAN, NICKAR", department: "BARGE LOADING-RONEX" }],
+["11044152", { name: "UBAY, SUSIMO", department: "BENEFICIATION-STANLY" }],
+["9815246", { name: "UMAMBONG, DANILO H.", department: "BARGE LOADING-RONEX" }],
+["6608826", { name: "UMAMBONG, JERIC T.", department: "PIT OPERATION" }],
+["5800563", { name: "URDELAS, JEFREY R. ", department: "BENEFICIATION-STANLY" }],
+["9775959", { name: "USMAN, MUBIN", department: "BARGE LOADING-MADRID" }],
+["3492642", { name: "VILLALVA, LEON ART S.", department: "BENEFICIATION" }],
+["11083569", { name: "ZUMARAGA, JULIE", department: "BENEFICIATION-STANLY" }],
+["11049692", { name: "ALANIS, JOLITO", department: "CAMP MAINTENANCE" }],
+["11049737", { name: "ALBARICO, EDGAR", department: "CAMP MAINTENANCE" }],
+["11060343", { name: "ALONZO, ERNESTO", department: "CAMP MAINTENANCE" }],
+["11049765", { name: "AYUCO, ANGELITO", department: "CAMP MAINTENANCE" }],
+["11051330", { name: "FRAGINAL, GALAHAD", department: "CAMP MAINTENANCE" }],
+["5807513", { name: "GUJELDE, IRENE", department: "CAMP MAINTENANCE" }],
+["11049720", { name: "HAMMAD, LOUWIE", department: "CAMP MAINTENANCE" }],
+["11030750", { name: "TABON, ZOSIMO", department: "CAMP MAINTENANCE" }],
+["11078152", { name: "TAMPALIK, JOEY", department: "CAMP MAINTENANCE" }],
+["1306735", { name: "VALLADORES, REYNALDO JR.", department: "CAMP MAINTENANCE" }],
+["11051329", { name: "VERUELA, EDWIN", department: "CAMP MAINTENANCE" }],
+["6612854", { name: "OQUENDO, ALEX", department: "COMPLIANCE & DOCUMENT MANAGEMENT" }],
+["9706729", { name: "ADJED, RAMONA", department: "COMREL" }],
+["11051311", { name: "ADJIMIN, SIMBIL", department: "COMREL" }],
+["10516437", { name: "ALIHAN, BOBIT", department: "COMREL" }],
+["9703425", { name: "APILAN, VANNESA", department: "COMREL" }],
+["11035761", { name: "AREVALO, ANGELO", department: "COMREL" }],
+["10894401", { name: "ASINO, AILYN", department: "COMREL" }],
+["11051748", { name: "BAQUIAO, FERNAN", department: "COMREL" }],
+["11016805", { name: "BAYLOSIS, VIOLITA", department: "COMREL" }],
+["11032781", { name: "BERMUDEZ, MARIANE", department: "COMREL" }],
+["9716622", { name: "DELA CHICA, JAIRUS", department: "COMREL" }],
+["9706730", { name: "DELA VEGA, JENNY", department: "COMREL" }],
+["11032740", { name: "DIDIK, MELISSA", department: "COMREL" }],
+["9706732", { name: "GUIAN, VENICE TERESA", department: "COMREL" }],
+["6604096", { name: "NUH, JAKARIA", department: "COMREL" }],
+["14269200", { name: "PANSARIE, NELSIE D.", department: "COMREL" }],
+["10871640", { name: "SABALOSA, AILEEN", department: "COMREL" }],
+["9703424", { name: "SALI, ISKAN", department: "COMREL" }],
+["14262450", { name: "TUMBAGA, RENIEL I.", department: "COMREL" }],
+["10881748", { name: "USOP, MONESSA", department: "COMREL" }],
+["10863894", { name: "ASA, MELCHOR C.", department: "CPFMS" }],
+["10863753", { name: "CASABAR, MERCEDES", department: "CPFMS" }],
+["11022097", { name: "DIOLA, GILBERT", department: "CPFMS" }],
+["11030935", { name: "HEREDERO, RICKY", department: "CPFMS" }],
+["11052483", { name: "LONG, JEFFRY R. ", department: "CPFMS" }],
+["11022820", { name: "MACATO, ELTIOMER", department: "CPFMS" }],
+["11052201", { name: "MALAHADLAHAD, MYLENE", department: "CPFMS" }],
+["11030921", { name: "MANUAL, MARK JAY", department: "CPFMS" }],
+["11022822", { name: "MERCADO, ROMMEL", department: "CPFMS" }],
+["11052190", { name: "NACNAC, RONALD", department: "CPFMS" }],
+["10863750", { name: "OPIALA, PAUL ANTHONY", department: "CPFMS" }],
+["11052214", { name: "TABINGA, DANTE", department: "CPFMS" }],
+["12145884", { name: "ETABLE, KARL ANTOINE", department: "ENGINEERING" }],
+["3331911", { name: "LANZADERAS, IRIS VI.", department: "ENGINEERING" }],
+["12097766", { name: "LINAZA, ORPHEUS", department: "ENGINEERING" }],
+["11038849", { name: "ABULENCIA, MIKEE M.", department: "FINANCE" }],
+["11011144", { name: "BALBONTIN, RONNA LEE", department: "FINANCE" }],
+["11082264", { name: "CAMPOS, ROSEMARIE ", department: "FINANCE" }],
+["11011834", { name: "ECLEVIA, BRENDA", department: "COMPLIANCE & DOCUMENT MANAGEMENT" }],
+["1327872", { name: "ROSE, EARLY JOHN", department: "FINANCE" }],
+["1372359", { name: "ROSERO, RESEL KEE", department: "FINANCE" }],
+["11019092", { name: "VILLARUEL, JENNYFEIR", department: "FINANCE" }],
+["10914594", { name: "CERONA, DIONESIO", department: "GENERAL AFFAIRS" }],
+["9853692", { name: "DELA CERNA, BENJAMIN", department: "GENERAL AFFAIRS" }],
+["6608848", { name: "DIONESIO CERONA", department: "GENERAL AFFAIRS" }],
+["11022938", { name: "GALIGAO, RYAN", department: "GENERAL AFFAIRS" }],
+["10933859", { name: "JANORAS, RIALYN", department: "GENERAL AFFAIRS" }],
+["3318770", { name: "LANZADERAS, MA. VICTORIA V.", department: "GENERAL AFFAIRS" }],
+["5556150", { name: "MILLENDEZ, DENNIS", department: "GENERAL AFFAIRS" }],
+["1379092", { name: "ORDONA, HOPE", department: "GENERAL AFFAIRS" }],
+["3339475", { name: "ABELA, SAMUEL", department: "GEOLOGY-DRILING-JONAS" }],
+["6613206", { name: "ABIOG, PHILIP", department: "GRADE CONTROL" }],
+["3416776", { name: "ABREA, JERION", department: "GEOLOGY-DRILING-JONAS" }],
+["3403528", { name: "ADDIE, RENE", department: "GEOLOGY-DRILING" }],
+["3323175", { name: "ADDIE, RENE-LATEST", department: "GEOLOGY-DRILING-JONAS" }],
+["3334795", { name: "AGUIRRE, RICKY", department: "GEOLOGY-DRILING" }],
+["12082069", { name: "AGUIRRE, RICKY-LATEST", department: "GEOLOGY-DRILING-JONAS" }],
+["10933864", { name: "ANGELES, JOHN ALDRICH", department: "GEOLOGY-DRILING-JONAS" }],
+["3240384", { name: "BANTILAN, ARIEL", department: "GEOLOGY-DRILING" }],
+["12097775", { name: "BANTILAN, ARIEL - LATEST", department: "GEOLOGY-DRILING" }],
+["3370012", { name: "BATAGON, PABLITO JR", department: "GEOLOGY-DRILING" }],
+["3279545", { name: "BERNARDINO, DANIEL", department: "GEOLOGY-DRILING" }],
+["3237253", { name: "BIASON, ROBERTO", department: "GEOLOGY-DRILING" }],
+["12144212", { name: "BUDONG, JERRY-LATEST", department: "GEOLOGY-DRILING-JONAS" }],
+["6314850", { name: "CABANSAG, REYNALDO", department: "GEOLOGY-DRILING" }],
+["3364387", { name: "CATA-CATA, JOSE DONALD", department: "GEOLOGY-DRILING-JONAS" }],
+["12082262", { name: "CONDE, NORSAIM", department: "GEOLOGY-DRILING" }],
+["6333355", { name: "CONDE, NORSAIM JALIL", department: "GEOLOGY-DRILING-JONAS" }],
+["12145593", { name: "DANO, JERRY", department: "GEOLOGY-DRILING" }],
+["3273623", { name: "DANO, JERRY JR.", department: "GEOLOGY-DRILING-JONAS" }],
+["3400472", { name: "DEMI, JERIKEL", department: "GEOLOGY-DRILING" }],
+["3413507", { name: "DIAL, NOEL SABRI", department: "GEOLOGY-DRILING" }],
+["3424912", { name: "ELAN, ROWEL", department: "GEOLOGY-DRILING" }],
+["14236391", { name: "ENSAR, REGEL", department: "GEOLOGY-DRILING" }],
+["12097173", { name: "ENSAR, REGEL-LATEST", department: "GEOLOGY-DRILING-JONAS" }],
+["3399521", { name: "EUPENA, FERDEHIL", department: "GEOLOGY-DRILING" }],
+["12110756", { name: "GAMAYON     EUGENIO III", department: "GEOLOGY-DRILING" }],
+["6299837", { name: "GANDARI, JOLINO", department: "GEOLOGY-DRILING" }],
+["12097575", { name: "GANDARI, JOLINO-LATEST", department: "GEOLOGY-DRILING-JONAS" }],
+["3338481", { name: "GOMEZ, SAMMIE", department: "GEOLOGY-DRILING" }],
+["12098422", { name: "GOMEZ, SAMMIE-LATEST", department: "GEOLOGY-DRILING-JONAS" }],
+["14257637", { name: "HAMPSON, ALDRIN", department: "GEOLOGY-DRILING-JONAS" }],
+["3308429", { name: "HERAMIS, ARIEL", department: "GEOLOGY-DRILING" }],
+["3244043", { name: "HERAMIS, RAYMUND", department: "GEOLOGY-DRILING" }],
+["12082457", { name: "HERAMIS, RAYMUND-LATEST", department: "GEOLOGY-DRILING-JONAS" }],
+["3276887", { name: "HUMANTOC, REY", department: "GEOLOGY-DRILING" }],
+["3316634", { name: "IBNO, JERLY", department: "GEOLOGY-DRILING-JONAS" }],
+["3413408", { name: "IBRAHIM, ANSAN", department: "GEOLOGY-DRILING-JONAS" }],
+["12144661", { name: "INDANAN, JEMAR", department: "GEOLOGY-DRILING-JONAS" }],
+["3325406", { name: "INOC, LEO", department: "GEOLOGY-DRILING-JONAS" }],
+["6300837", { name: "ISDAL, AISAL", department: "GEOLOGY-DRILING" }],
+["3403294", { name: "JAKIL, JUNER", department: "GEOLOGY-DRILING" }],
+["3357145", { name: "JAKIL, JUNER-LATEST", department: "GEOLOGY-DRILING" }],
+["3402684", { name: "JAVID, JERICK", department: "GEOLOGY-DRILING" }],
+["3371021", { name: "JAVID, JERICK-LATEST", department: "GEOLOGY-DRILING-JONAS" }],
+["6321043", { name: "LACOSTALES, JOSE IV", department: "GEOLOGY-DRILING-JONAS" }],
+["5911557", { name: "LAGTIKAN, JEKSON E.", department: "GEOLOGY-DRILING" }],
+["12127552", { name: "LAGTIKAN, MECSON", department: "GEOLOGY-DRILING" }],
+["3328188", { name: "LAGTIKAN, MECSON E.", department: "GEOLOGY-DRILING" }],
+["3269445", { name: "MADJAME MICHAEL", department: "GEOLOGY-DRILING" }],
+["3313558", { name: "MAJINJI, ART B.", department: "GEOLOGY-DRILING" }],
+["3348674", { name: "MERSAG, RIO RIKIT", department: "GEOLOGY-DRILING" }],
+["3406937", { name: "MINGKE, DADITH C.", department: "GEOLOGY-DRILING-JONAS" }],
+["3372657", { name: "MOGA, RICHARD", department: "GEOLOGY-DRILING-JONAS" }],
+["3516174", { name: "MOLEJON, JHONLIE", department: "GEOLOGY-DRILING" }],
+["12145793", { name: "MUSCAT, EDMON", department: "GEOLOGY-DRILING" }],
+["3339505", { name: "MUSCAT, EDMON - LATEST", department: "GEOLOGY-DRILING-JONAS" }],
+["12122837", { name: "NUHAY, DANTE", department: "GEOLOGY-DRILING-JONAS" }],
+["12095550", { name: "OGHAYON, ERNNE", department: "GEOLOGY-DRILING" }],
+["3322315", { name: "OGHAYON, ERNNE S.", department: "GEOLOGY-DRILING-JONAS" }],
+["3276291", { name: "ORDONEZ, KAYCE QUEEN", department: "GEOLOGY-DRILING-JONAS" }],
+["12144363", { name: "BATAGON, PABLITO JR.", department: "GEOLOGY-DRILING-JONAS" }],
+["12146134", { name: "PAKI, SAHID", department: "GEOLOGY-DRILING" }],
+["12098619", { name: "PILARCA, MICHAEL", department: "GEOLOGY-DRILING" }],
+["3349414", { name: "PILARCA, MICHAEL H.", department: "GEOLOGY-DRILING-JONAS" }],
+["3370382", { name: "PONCIAL, DENNIS", department: "GEOLOGY-DRILING" }],
+["3325644", { name: "PONCIAL, DENNIS N.", department: "GEOLOGY-DRILING-JONAS" }],
+["6634790", { name: "PONCIAL, JOSELITO", department: "GEOLOGY-DRILING" }],
+["3387755", { name: "PONCIAL, JOSELITO N.", department: "GEOLOGY-DRILING" }],
+["3345721", { name: "RELLORES, RAMDY", department: "GEOLOGY-DRILING" }],
+["5911759", { name: "RELLORES, RAMDY B.", department: "GEOLOGY-DRILING-JONAS" }],
+["12096972", { name: "ROMAHAN, GILBERT T.", department: "GEOLOGY-DRILING-JONAS" }],
+["3324503", { name: "ROMAHAN, ALBERT TARABUSAO", department: "GEOLOGY-DRILING-JONAS" }],
+["3316652", { name: "SAIDIL, SABTUHARIN B.", department: "GEOLOGY-DRILING" }],
+["12146256", { name: "SEMILLANO, ELIAQUIM", department: "GEOLOGY-DRILING" }],
+["5888323", { name: "SEMILLANO, ELIQUIM B.", department: "GEOLOGY-DRILING-JONAS" }],
+["12081683", { name: "SERIOZA, REYLOMEN", department: "GEOLOGY-DRILING" }],
+["3325844", { name: "SERIOZA, REYLOMEN A.", department: "GEOLOGY-DRILING-JONAS" }],
+["3239145", { name: "SUMIBAY, REX O.", department: "GEOLOGY-DRILING" }],
+["3280303", { name: "TABI, RENEBOY", department: "GEOLOGY-DRILING" }],
+["3323286", { name: "TABI, RENEBOY B.", department: "GEOLOGY-DRILING-JONAS" }],
+["12126928", { name: "TABLIGAN, RONALD", department: "GEOLOGY-DRILING-JONAS" }],
+["3410405", { name: "TABLIGAN, RONALD LUHAN", department: "GEOLOGY-DRILING-JONAS" }],
+["14244570", { name: "TABOK, JONNY", department: "GEOLOGY-DRILING" }],
+["3290246", { name: "TABOK, RENIEL P.", department: "GEOLOGY-DRILING" }],
+["9669309", { name: "TAGLE, ALIGER", department: "GEOLOGY-DRILING" }],
+["3380545", { name: "TALAME, DIZON", department: "GEOLOGY-DRILING" }],
+["14236691", { name: "TALAME, DIZON A.", department: "GEOLOGY-DRILING-JONAS" }],
+["3292609", { name: "TALAME, NORLAN A.", department: "GEOLOGY-DRILING" }],
+["3320141", { name: "TANGQUERIDO, RAMIE", department: "GEOLOGY-DRILING" }],
+["6634523", { name: "TINGCATAN, ALJON E.", department: "GEOLOGY-DRILING" }],
+["3316677", { name: "TINGCATAN, JEGAR-LATEST", department: "GEOLOGY-DRILING" }],
+["3391879", { name: "TORRES, ANTONIO II", department: "GEOLOGY-DRILING-JONAS" }],
+["9788376", { name: "TOTO, JAYSON", department: "GEOLOGY-DRILING" }],
+["3349171", { name: "URDELAS, OLIVER", department: "GEOLOGY-DRILING" }],
+["3404857", { name: "URDELAS, JOBERT SON DE GOZAR", department: "GEOLOGY-DRILING-JONAS" }],
+["3259544", { name: "URSABIA, RICHARD", department: "GEOLOGY-DRILING" }],
+["14262544", { name: "URSABIA, RICHARD M.", department: "GEOLOGY-DRILING-JONAS" }],
+["3417474", { name: "VERGARA, MARYLIE TERESITA", department: "GEOLOGY-DRILING-JONAS" }],
+["1342874", { name: "VILLANUEVA, JONAS", department: "GEOLOGY-DRILING" }],
+["3424949", { name: "VILLARUZ, BRYAN A.", department: "GEOLOGY-DRILING" }],
+["3361950", { name: "BUDONG, JERRY", department: "GEOLOGY-DRILING-JONAS" }],
+["3242949", { name: "TINGCATAN, JEGAR", department: "GEOLOGY-DRILLING" }],
+["3331753", { name: "ABING, JUBETH", department: "GRADE CONTROL" }],
+["14257297", { name: "ABING, RICARDO", department: "GRADE CONTROL" }],
+["1334694", { name: "ALBARICO, JESTONI", department: "GRADE CONTROL" }],
+["1337937", { name: "ALCALDE, HASSANAL", department: "GRADE CONTROL" }],
+["6598158", { name: "SALI, BENJIE", department: "GRADE CONTROL" }],
+["9633385", { name: "ALINSANGAO, NONITO A. ", department: "GRADE CONTROL" }],
+["5823185", { name: "ALONZO, ANDREW BON", department: "GRADE CONTROL" }],
+["10898254", { name: "ANDAP, NALSON", department: "GRADE CONTROL" }],
+["4643404", { name: "ANDRIN, NICKSON", department: "GRADE CONTROL" }],
+["3759209", { name: "ARCANO, NINO B.", department: "GRADE CONTROL" }],
+["9812196", { name: "ASADDI, JUMADEL", department: "GRADE CONTROL" }],
+["14241763", { name: "ASARAL, ARSAN", department: "GRADE CONTROL" }],
+["4650769", { name: "AYOB, ALIVIN", department: "GRADE CONTROL" }],
+["11315392", { name: "BALLARBARE, LOUIE", department: "GRADE CONTROL" }],
+["9640871", { name: "BALLENAS, DEAN", department: "GRADE CONTROL" }],
+["11083777", { name: "BAMBICO, MICHAEL", department: "GRADE CONTROL" }],
+["15006124", { name: "BARTE, REYNALDO", department: "GRADE CONTROL" }],
+["10516396", { name: "BASAN, JOHNEL", department: "GRADE CONTROL" }],
+["3328085", { name: "BATAGON, DANILO", department: "GRADE CONTROL" }],
+["14238223", { name: "BEDES, KENNETH", department: "GRADE CONTROL" }],
+["1366835", { name: "BELLO, JON LEO", department: "GRADE CONTROL" }],
+["3318388", { name: "BIANZON, JOEY", department: "GRADE CONTROL" }],
+["9641028", { name: "BULAC, BAYANE", department: "GRADE CONTROL" }],
+["5804432", { name: "BUTAWAN, EDGAR JR", department: "GRADE CONTROL" }],
+["3338443", { name: "CABALTERA, BRIX ANDREW", department: "GRADE CONTROL" }],
+["4655182", { name: "CAJILA, WILLIAM", department: "GRADE CONTROL" }],
+["10890369", { name: "CAMBAL, VINCENT", department: "GRADE CONTROL" }],
+["9716539", { name: "CAMORA, NEIL", department: "GRADE CONTROL" }],
+["9641031", { name: "CENA, PABLITO M.", department: "GRADE CONTROL" }],
+["14267368", { name: "COLA, MARK DONALD", department: "GRADE CONTROL" }],
+["9725743", { name: "CUAJAO, JOVANY A.", department: "GRADE CONTROL" }],
+["10898397", { name: "CURSOD, JOVEN", department: "GRADE CONTROL" }],
+["1361951", { name: "CUSIN, JHONY", department: "GRADE CONTROL" }],
+["3321417", { name: "DACUMOS, JOSEPH", department: "GRADE CONTROL" }],
+["3333821", { name: "DECOSTO, JAYKEL M.", department: "GRADE CONTROL" }],
+["5804415", { name: "DELA ROSA, NESTOR JR.", department: "GRADE CONTROL" }],
+["1332713", { name: "DILAN, DINDO", department: "GRADE CONTROL" }],
+["1306618", { name: "DINO, MUHAMMAD AMERHAMJA", department: "GRADE CONTROL" }],
+["10896585", { name: "DIOSO, ALEJANDRO", department: "GRADE CONTROL" }],
+["11054614", { name: "DOMINADO, KENNY JOHN", department: "GRADE CONTROL" }],
+["9722373", { name: "DOMINGO, EMMANUEL", department: "GRADE CONTROL" }],
+["14910719", { name: "DOYDORA, CHRISTIAN", department: "GRADE CONTROL" }],
+["11042652", { name: "DULAPO, SHEREWIE", department: "GRADE CONTROL" }],
+["9635871", { name: "DUMDUM, ALLAN MARK", department: "GRADE CONTROL" }],
+["9635872", { name: "DUNAN, JONALD", department: "GRADE CONTROL" }],
+["3393090", { name: "EBAL, JOHN", department: "GRADE CONTROL" }],
+["13128200", { name: "ECALDRE, JERRY", department: "GRADE CONTROL" }],
+["9722370", { name: "ELDAO, RENEIL", department: "GRADE CONTROL" }],
+["3321234", { name: "ENSAR, JOLMAN", department: "GRADE CONTROL" }],
+["9670423", { name: "EPPIE, JEMAR", department: "GRADE CONTROL" }],
+["9758735", { name: "ESTANO, MARK CEZAR", department: "GRADE CONTROL" }],
+["10890384", { name: "FERNANDEZ, IVAN MEL", department: "GRADE CONTROL" }],
+["10500442", { name: "FERNANDEZ, JOSELITO JR.", department: "GRADE CONTROL" }],
+["3741754", { name: "GAPUZ, RUEL", department: "GRADE CONTROL" }],
+["1335920", { name: "GATCHALIAN, FERNANDO JR", department: "GRADE CONTROL" }],
+["3750643", { name: "GERALDINO, RODEL", department: "GRADE CONTROL" }],
+["14253609", { name: "GONZALES, CARLOS", department: "GRADE CONTROL" }],
+["5808617", { name: "GUJILDE, MARK ANTHONY", department: "GRADE CONTROL" }],
+["10898512", { name: "GULAY, MARVIN", department: "GRADE CONTROL" }],
+["14251790", { name: "HADJIRI, OMAR I.", department: "GRADE CONTROL" }],
+["13119238", { name: "HASSAN, ROSMIL", department: "GRADE CONTROL" }],
+["5811548", { name: "HESARZA, ANDREW", department: "GRADE CONTROL" }],
+["1328896", { name: "IBAS, RIOBERT", department: "GRADE CONTROL" }],
+["3302706", { name: "IBEL, ERIC", department: "GRADE CONTROL" }],
+["3739740", { name: "ILAHAN, ROMMEL", department: "GRADE CONTROL" }],
+["9710756", { name: "INDANAN, DELSON", department: "GRADE CONTROL" }],
+["3720929", { name: "JAHAR, EDWIN", department: "GRADE CONTROL" }],
+["9725744", { name: "JIMENEZ, JUNJUN", department: "GRADE CONTROL" }],
+["9815248", { name: "JUMAANI, RASIL J.", department: "GRADE CONTROL" }],
+["3739550", { name: "JUMAANI, SADDAM J.", department: "GRADE CONTROL" }],
+["10890064", { name: "LAGRADA, VEMBER", department: "GRADE CONTROL" }],
+["3412357", { name: "LASAPIN, ARTCHIE M.", department: "GRADE CONTROL" }],
+["15050623", { name: "LEPASANA, MELVIN", department: "GRADE CONTROL" }],
+["3406302", { name: "LISTAGA, EMELIO B.", department: "GRADE CONTROL" }],
+["9759863", { name: "LLACUNA, ELMER D.", department: "GRADE CONTROL" }],
+["9815247", { name: "MADESA, GABRIEL S.", department: "GRADE CONTROL" }],
+["3740122", { name: "MAHILUM, JAYSON G.", department: "GRADE CONTROL" }],
+["3455979", { name: "MALAN, JAIME J.", department: "GRADE CONTROL" }],
+["3765595", { name: "MALAN, LODING", department: "GRADE CONTROL" }],
+["3765163", { name: "MALVAS, RAYNO", department: "GRADE CONTROL" }],
+["3740315", { name: "MANGLANLAN, JERRY C.", department: "GRADE CONTROL" }],
+["3416300", { name: "MARCELO, EZYL JAMES C.", department: "GRADE CONTROL" }],
+["3330459", { name: "MARSA, ERICK B.", department: "GRADE CONTROL" }],
+["9767611", { name: "MARSA, SANNY BOY R.", department: "GRADE CONTROL" }],
+["4781833", { name: "MONTANO, DJUDE C.", department: "GRADE CONTROL" }],
+["11051580", { name: "MONTANO, MICHAEL", department: "GRADE CONTROL" }],
+["3259217", { name: "MOSQUERA, ELMER S.", department: "GRADE CONTROL" }],
+["15050646", { name: "MOSQUERA, RICHARD", department: "GRADE CONTROL" }],
+["14267214", { name: "MOSQUERA, RYAN RAY L.", department: "GRADE CONTROL" }],
+["3758636", { name: "MURCIANO, JERRY A.", department: "GRADE CONTROL" }],
+["11051745", { name: "NACIONAL, KRISTIANNE", department: "GRADE CONTROL" }],
+["3286452", { name: "NADAR, EARL AUSTIN B.", department: "GRADE CONTROL" }],
+["9725745", { name: "NALLANA, JOHN JOSEPH B.", department: "GRADE CONTROL" }],
+["6597377", { name: "NICKON ANDRIN", department: "GRADE CONTROL" }],
+["11027098", { name: "ODERON, JONALD", department: "GRADE CONTROL" }],
+["4578061", { name: "OSIANA, REX", department: "GRADE CONTROL" }],
+["5804447", { name: "PADILLA, CHRISTIAN ALLEN G.", department: "GRADE CONTROL" }],
+["9767610", { name: "PALO, JAYSON F.", department: "GRADE CONTROL" }],
+["3758444", { name: "PATIO, JOSHUA A.", department: "GRADE CONTROL" }],
+["1404252", { name: "PEPITO, RONALD", department: "GRADE CONTROL" }],
+["1379011", { name: "PEREZ, GLEN", department: "GRADE CONTROL" }],
+["10792251", { name: "PILONE, RAMON", department: "GRADE CONTROL" }],
+["10500381", { name: "PLAZA, ANNIE", department: "GRADE CONTROL" }],
+["3456355", { name: "PLAZA, SHIRLAN S.", department: "GRADE CONTROL" }],
+["5800541", { name: "PRESADO, NANDY", department: "GRADE CONTROL" }],
+["3574019", { name: "PULIDO, GERALD E.", department: "GRADE CONTROL" }],
+["10898161", { name: "QUIOCSON, ERBIE", department: "GRADE CONTROL" }],
+["9722374", { name: "RAYMUNDO, ARNOLD S.", department: "GRADE CONTROL" }],
+["11035051", { name: "REGALADO, ARJON", department: "GRADE CONTROL" }],
+["11030944", { name: "REGALADO, ARNOLD", department: "GRADE CONTROL" }],
+["6598181", { name: "RUEL GAPUZ", department: "GRADE CONTROL" }],
+["9722372", { name: "SABADO, JHONMAR E.", department: "GRADE CONTROL" }],
+["1331307", { name: "SALI, ABDULGAFUR", department: "GRADE CONTROL" }],
+["11030867", { name: "SALI, BENJIE", department: "GRADE CONTROL" }],
+["9722371", { name: "SALIDO, MARK V.", department: "GRADE CONTROL" }],
+["9758733", { name: "SAMAT, JAYMAR", department: "GRADE CONTROL" }],
+["10508191", { name: "SANCHEZ, MARJUN R.", department: "GRADE CONTROL" }],
+["3327871", { name: "SANCHEZ, MILKY BHOY R.", department: "GRADE CONTROL" }],
+["6342948", { name: "SANTURCAS, JASON C.", department: "GRADE CONTROL" }],
+["4657802", { name: "SEGOVIA, NONITO JR.", department: "GRADE CONTROL" }],
+["11051722", { name: "SERRANO, VICENTE", department: "GRADE CONTROL" }],
+["6314290", { name: "SIPLAN, JEREMY M.", department: "GRADE CONTROL" }],
+["10508234", { name: "SOLIDAGA, REC-SON G.", department: "GRADE CONTROL" }],
+["3401167", { name: "SUPRECENCIA, JOHN PHILIP B.", department: "GRADE CONTROL" }],
+["14910741", { name: "TALATAGOD,JACINTO JR.", department: "GRADE CONTROL" }],
+["3750435", { name: "TAMAYO, EUGENE", department: "GRADE CONTROL" }],
+["4640722", { name: "TAN, SALAZAR", department: "GRADE CONTROL" }],
+["15036579", { name: "TANHENTE, ARVEN", department: "GRADE CONTROL" }],
+["10508235", { name: "TORRES, MARK D.", department: "GRADE CONTROL" }],
+["14911582", { name: "TOTESORA, ANCHITO", department: "GRADE CONTROL" }],
+["10905564", { name: "TRES REYES, RICARDO G.", department: "GRADE CONTROL" }],
+["10500209", { name: "UMAYAM, NESTOR E.", department: "GRADE CONTROL" }],
+["10500441", { name: "USMAN, PAOGIE A.", department: "GRADE CONTROL" }],
+["10870283", { name: "VENTURA, JONATHAN D.", department: "GRADE CONTROL" }],
+["10870276", { name: "ZAMORA, ZYRUS G.", department: "GRADE CONTROL" }],
+["1361975", { name: "PANES, JEAN", department: "GUEST LODGE" }],
+["1369863", { name: "SALAZAR, MALOU", department: "GUEST LODGE" }],
+["1369846", { name: "SOLANO, RUBEN JR.", department: "GUEST LODGE" }],
+["5791347", { name: "ALOJAN, JULIE", department: "HUMAN RESOURCES" }],
+["9694670", { name: "ANDOLOY, LORENA", department: "HUMAN RESOURCES" }],
+["11019126", { name: "ARSITIO, LILIBETH", department: "HUMAN RESOURCES" }],
+["1372323", { name: "BOCOBO, SHEILA MAE", department: "HUMAN RESOURCES" }],
+["3401718", { name: "JUANEZA, LYRA MAE AUSAN", department: "HUMAN RESOURCES" }],
+["4751133", { name: "SALANGA, CHERRY S.", department: "HUMAN RESOURCES" }],
+["4751697", { name: "TIMBANCAYA, DAPHNE G.", department: "HUMAN RESOURCES" }],
+["7593308", { name: "TUYAK, MAY ANNE", department: "HUMAN RESOURCES" }],
+["11085424", { name: "GABINETE, RYAN", department: "ICT" }],
+["3326700", { name: "PASCUA, LEO JR.", department: "ICT" }],
+["9632576", { name: "SAPAR, RAFFY", department: "ICT" }],
+["15006146", { name: "ARQUERO, MARY VIANNEY", department: "IMS" }],
+["15006135", { name: "LUCHANA, AUGIE", department: "IMS" }],
+["1372570", { name: "BAQUIAO, MARY ANNE", department: "WAREHOUSE" }],
+["1372368", { name: "LOZANO, MA. RITA AIRENE", department: "COMPLIANCE & DOCUMENT MANAGEMENT" }],
+["1367655", { name: "BADILLES, RUEL", department: "TSD-WF-DANGANAN" }],
+["9722366", { name: "FERNANDEZ, EUSTIQUIO", department: "TSD-WF-DANGANAN" }],
+["11067935", { name: "GANGOSO, BRYAN KARL", department: "BARGE LOADING-MADRID" }],
+["1334716", { name: "RIOVEROS, ERIC", department: "BARGE LOADING" }],
+["6584552", { name: "TAJANLANGIT, ALEXANDER A.", department: "LIMONITE" }],
+["6634552", { name: "TUCANG, MERLITO E.", department: "DRILLING" }],
+["6597391", { name: "UNARCE, JOHN JOSEPH N.", department: "LIMONITE" }],
+["11034495", { name: "AQUIN,NELSON", department: "BENEFICIATION-STANLY" }],
+["11031234", { name: "UBAY,CARMELO", department: "PIT-RAUL" }],
+["12114072", { name: "ABDULPATTA, ABDUL ASHIQUIN", department: "LIMONITE-BETH" }],
+["5800554", { name: "ABDURAHMAN, GARRY", department: "LIMONITE-BALMES" }],
+["11036253", { name: "ABDURASID, HUSNI", department: "LIMONITE-BAIROY" }],
+["14253391", { name: "ABUBAKAR, ALSAHMIR", department: "LIMONITE-BALMES" }],
+["11082015", { name: "ADJED, JURAPHY", department: "LIMONITE-BALMES" }],
+["3408695", { name: "AGUILOS, JONJON", department: "LIMONITE-BAIROY" }],
+["12096365", { name: "AIDIL MASATUL", department: "LIMONITE" }],
+["14911809", { name: "ALAYON, DARYL", department: "LIMONITE-BALMES" }],
+["3757953", { name: "ALEJANDRO, JOHMAR", department: "LIMONITE-BAIROY" }],
+["4753273", { name: "ALIA, ENERIO", department: "LIMONITE-BAIROY" }],
+["11013628", { name: "ALOJAN, VICTORIO JR.", department: "LIMONITE-BAIROY" }],
+["10863323", { name: "ALOLOR, WILLY", department: "LIMONITE-BALMES" }],
+["10804340", { name: "AMBALISA, ALBERT", department: "LIMONITE-BAIROY" }],
+["3753548", { name: "AMENDO, JERSON", department: "LIMONITE-BALMES" }],
+["3758828", { name: "ANDAL, REXON", department: "LIMONITE-BAIROY" }],
+["10870349", { name: "ANJAWANG, OMAR", department: "LIMONITE-BAIROY" }],
+["9775958", { name: "ARADO, ROGELIO JOEL", department: "LIMONITE-BALMES" }],
+["9670422", { name: "ARCE, AHMAD", department: "LIMONITE-BALMES" }],
+["3749706", { name: "BACULIO, JEFHON", department: "LIMONITE-BALMES" }],
+["3753138", { name: "BAHANDE, MARIANO JR.", department: "LIMONITE-BETH" }],
+["11068101", { name: "BAIROY, BRYAN-ZONY", department: "LIMONITE-BAIROY" }],
+["3411149", { name: "BALDAD, JONIE", department: "LIMONITE-BAIROY" }],
+["3253879", { name: "BANAAG, BOBBY", department: "LIMONITE-BALMES" }],
+["6580646", { name: "BANGGAY, TEDDY", department: "LIMONITE-BALMES" }],
+["14895060", { name: "BANI, HASIMAN", department: "LIMONITE-BALMES" }],
+["3395439", { name: "BARADERO, JERSON", department: "LIMONITE-BETH" }],
+["11045347", { name: "BARGOYO, DALMACIO", department: "LIMONITE-BALMES" }],
+["7581394", { name: "BARRAMEDA, ALEXANDER", department: "LIMONITE-BALMES" }],
+["10896434", { name: "BARRIA, GREGOR", department: "LIMONITE-BETH" }],
+["10916919", { name: "BIBERA, MELMARK", department: "LIMONITE-BALMES" }],
+["11029263", { name: "BOTON, BERNARD", department: "LIMONITE" }],
+["3417800", { name: "BOTON, BERNARD (NEW)", department: "LIMONITE-BAIROY" }],
+["3442515", { name: "CABANILLA, ARTURO JR.", department: "LIMONITE-BAIROY" }],
+["9767609", { name: "CABULAO, LARIE", department: "LIMONITE-BAIROY" }],
+["3423319", { name: "CAYANAN, CALVIN", department: "LIMONITE-BALMES" }],
+["10900384", { name: "CONSTANTINO, ISAAC", department: "LIMONITE" }],
+["3759019", { name: "CUARIO, JUMAR", department: "LIMONITE-BAIROY" }],
+["11045571", { name: "DALENDEG, ELARDE", department: "LIMONITE-BAIROY" }],
+["3291868", { name: "DASMARINAS, NINO", department: "LIMONITE-BETH" }],
+["10896747", { name: "DELA PAZ, CLEMENTE", department: "LIMONITE-BAIROY" }],
+["9759865", { name: "ENCOMIENDA, LEOMAR", department: "LIMONITE-BALMES" }],
+["10866525", { name: "ESCALA, CHARLY", department: "BARGE LOADING-MADRID" }],
+["11051766", { name: "ESCULTOR, CRESMAR", department: "LIMONITE-BALMES" }],
+["9758854", { name: "FAJARDO, MONZOUR", department: "LIMONITE-BAIROY" }],
+["9669780", { name: "FAJARDO, RIO", department: "LIMONITE-BALMES" }],
+["10871570", { name: "GARCIA, RICO", department: "LIMONITE-BAIROY" }],
+["11076665", { name: "GASPAR, HECTOR", department: "LIMONITE-BAIROY" }],
+["11036228", { name: "GORECHO, HENRY", department: "LIMONITE-BAIROY" }],
+["10881735", { name: "HALIPA, SALA", department: "LIMONITE-BALMES" }],
+["11051811", { name: "HATAB, CLAIFORD", department: "LIMONITE-BAIROY" }],
+["11077948", { name: "HEREDERO, FRANCISCO", department: "LIMONITE-BAIROY" }],
+["11034789", { name: "HERNANDEZ, MICHAEL", department: "LIMONITE-BALMES" }],
+["3760147", { name: "IBAÑEZ, RANDY", department: "LIMONITE-BALMES" }],
+["10487754", { name: "IBRAHIM, JOILY", department: "LIMONITE-BAIROY" }],
+["11048340", { name: "ISMAEL, IBRAHIM", department: "LIMONITE-BAIROY" }],
+["11083710", { name: "JAAPAL, HARON", department: "LIMONITE-BALMES" }],
+["9806786", { name: "JANAIRO, ROGELIO JR.", department: "LIMONITE-BAIROY" }],
+["9767608", { name: "JUANITES, ROMY E.", department: "LIMONITE-BALMES" }],
+["6604093", { name: "JURILLA, JHONREY", department: "LIMONITE-BAIROY" }],
+["3395790", { name: "BACLAOCOS, KENNETH RYAN ", department: "LIMONITE-JEHU" }],
+["1333099", { name: "LABRADOR, RAUL", department: "LIMONITE-BAIROY" }],
+["11027254", { name: "LARA, AL-ROBINSON", department: "LIMONITE-BALMES" }],
+["11034767", { name: "LARA, ARNEL", department: "LIMONITE-BALMES" }],
+["1388442", { name: "LARGADO, RICKY", department: "LIMONITE-BAIROY" }],
+["9853697", { name: "LIMBAGA, ARTEMIO", department: "LIMONITE-BALMES" }],
+["3742149", { name: "MACOCO, CHITO R.", department: "LIMONITE-BAIROY" }],
+["3331060", { name: "MADRIGAL, JAYMAR A.", department: "LIMONITE-BAIROY" }],
+["9715272", { name: "MAHAMMOD, ABDUL-RASHED", department: "LIMONITE-BALMES" }],
+["10896288", { name: "MAMPAWA, SALVADOR", department: "LIMONITE-BAIROY" }],
+["11019141", { name: "MANDAWE, WILNOLD", department: "LIMONITE" }],
+["11016570", { name: "MANGA, GENARD", department: "LIMONITE-BALMES" }],
+["9706713", { name: "MARTINEZ, RONALD E.", department: "LIMONITE" }],
+["3247097", { name: "MENDOVA, ALBERTO N.", department: "LIMONITE-BALMES" }],
+["11045392", { name: "MENDOZA, ALLAN", department: "LIMONITE-BALMES" }],
+["9853698", { name: "MILLENDEZ, JENEBERT", department: "LIMONITE-BALMES" }],
+["5800585", { name: "MOHAMMAD, ZALDY", department: "LIMONITE-BALMES" }],
+["15006169", { name: "MONTESA JESSRIEL", department: "LIMONITE-BALMES" }],
+["11019077", { name: "MONTESA, JOSE", department: "LIMONITE" }],
+["9723952", { name: "OBRIQUE, WILFREDO", department: "LIMONITE-BAIROY" }],
+["10862379", { name: "OCHEA, JESSIE", department: "BARGE LOADING-MADRID" }],
+["11045547", { name: "OLAC, ELMER", department: "LIMONITE-BAIROY" }],
+["9810620", { name: "ORACOY, NORMAN", department: "LIMONITE" }],
+["10870365", { name: "PACAO, MADRON", department: "LIMONITE-BAIROY" }],
+["3573692", { name: "PEDIGAN, ARIEL S.", department: "LIMONITE-BALMES" }],
+["10862313", { name: "PELAYO, ROLANDO", department: "BARGE LOADING-MADRID" }],
+["3304849", { name: "PINEDA, RIONIEL M.", department: "LIMONITE-BAIROY" }],
+["9759084", { name: "RABANES, FRANCISCO", department: "LIMONITE-BALMES" }],
+["14911766", { name: "ROBLES, JAVIER", department: "LIMONITE-BALMES" }],
+["11031237", { name: "SAGALA, ASUERO JR.", department: "LIMONITE-BAIROY" }],
+["10799358", { name: "SAHIJOL, ABUBAKAR", department: "LIMONITE-BALMES" }],
+["9876406", { name: "SALIVIO, BENVENIDO", department: "LIMONITE-BAIROY" }],
+["10887729", { name: "SANTELICES, JEHU", department: "LIMONITE-JEHU" }],
+["9635581", { name: "SECADRON, RYAN", department: "LIMONITE-BAIROY" }],
+["3425656", { name: "SENIAL, BOBBY", department: "LIMONITE" }],
+["3742348", { name: "SENIAL, BOBBY P.", department: "LIMONITE-BETH" }],
+["1340347", { name: "TABINGO, CHARLTON", department: "LIMONITE" }],
+["9715271", { name: "TAHIL, MASRIN", department: "LIMONITE-BAIROY" }],
+["11017105", { name: "TOLOMIA, DIONELO", department: "LIMONITE" }],
+["11042547", { name: "TRINIDAD, HAREC", department: "LIMONITE-BAIROY" }],
+["11066645", { name: "VENTURA, JAIME", department: "LIMONITE-BAIROY" }],
+["11019947", { name: "VENTURA, REY", department: "BARGE LOADING-RONEX" }],
+["9763187", { name: "VENTURA, RENIE", department: "LIMONITE-JEHU" }],
+["9812184", { name: "VIDAL, JONATHAN", department: "LIMONITE-BALMES" }],
+["1329516", { name: "ABEDEJOS, PABLO", department: "LIMONITE/ ORE FEED" }],
+["4659395", { name: "ABOLUCION, DANILO JR.", department: "LIMONITE/ ORE FEED" }],
+["3281275", { name: "ABOLUCION, DANILO JR.(NEW)", department: "LIMONITE-BETH" }],
+["10513928", { name: "ALIE, MOMEN", department: "LIMONITE-JEHU" }],
+["1373986", { name: "ALONSABE, APRECITO", department: "LIMONITE-JEHU" }],
+["9632574", { name: "ARINEZ, ANTONIO JR.", department: "LIMONITE/ ORE FEED" }],
+["9793304", { name: "ARINEZ, RONALD", department: "LIMONITE-BETH" }],
+["3395967", { name: "BANDA, LOMAN", department: "LIMONITE-JEHU" }],
+["9743316", { name: "BERCE, NONONG", department: "BENEFICIATION-ROMEL" }],
+["10485305", { name: "BERMUDEZ, ELIZABETH", department: "LIMONITE-BETH" }],
+["1388419", { name: "DAMASCO, RICHARD", department: "LIMONITE-BETH" }],
+["4560002", { name: "FERNANDO, EUGENE", department: "LIMONITE-BETH" }],
+["6597730", { name: "FERNANDO, GERARDO", department: "LIMONITE-JEHU" }],
+["9812193", { name: "FIGURACION, LIMUEL", department: "LIMONITE/ ORE FEED" }],
+["15046513", { name: "GUILLERMO, RONELO", department: "LIMONITE-BETH" }],
+["10493064", { name: "JALINAN, ROLLY", department: "LIMONITE-JEHU" }],
+["11019099", { name: "KASIM, HAYRIL", department: "LIMONITE-JEHU" }],
+["11021893", { name: "LAGAN, GERALD", department: "LIMONITE/ ORE FEED" }],
+["10863304", { name: "LASAPIN, CARLO", department: "LIMONITE-JEHU" }],
+["3270609", { name: "MABASA, CARLOS  JR.", department: "LIMONITE-JEHU" }],
+["10513950", { name: "MABUYAO, WELMAR", department: "LIMONITE-BETH" }],
+["1312410", { name: "MANGA, ARIEL", department: "LIMONITE-BETH" }],
+["9770496", { name: "MOLINO, REYMOND", department: "LIMONITE-BETH" }],
+["11020152", { name: "MONTESA, JOEMARIE", department: "LIMONITE-BETH" }],
+["4654630", { name: "MOZO, DINDO", department: "LIMONITE/ ORE FEED" }],
+["11013631", { name: "NULUDDIN, JEMRY", department: "LIMONITE-JEHU" }],
+["10870019", { name: "OQUENDO, CYRYX JAN", department: "LIMONITE-JEHU" }],
+["3573856", { name: "PANES, ROMULO JR.", department: "LIMONITE-BETH" }],
+["9639557", { name: "PATIAG JR, REYNALDO A.", department: "LIMONITE-JEHU" }],
+["11055101", { name: "RABANES, MARVIN", department: "LIMONITE-JEHU" }],
+["1353764", { name: "RADJUDIN, RAKEB", department: "LIMONITE-JEHU" }],
+["11019096", { name: "RENTUHAN, REDEN", department: "LIMONITE-BETH" }],
+["9812188", { name: "ROSE, JOMAR", department: "LIMONITE-BETH" }],
+["10513947", { name: "SABORNIDO, JAMES", department: "LIMONITE-BETH" }],
+["10884378", { name: "SAGALA, REWEL", department: "LIMONITE-JEHU" }],
+["11076599", { name: "SALI, HARLIE", department: "LIMONITE-BETH" }],
+["1337857", { name: "SICADRON, RANDY", department: "LIMONITE-JEHU" }],
+["1332851", { name: "SINAY, RAZEL", department: "LIMONITE-BETH" }],
+["4671503", { name: "UBOGAN, EDGAR", department: "LIMONITE-BETH" }],
+["9723950", { name: "URDELAS, GARY R.", department: "LIMONITE-BETH" }],
+["14894926", { name: "VILLAFLORES, LESLIE", department: "LIMONITE-JEHU" }],
+["3395614", { name: "MARIANO BAHANDE JR.", department: "LIMONITE/ ORE FEED" }],
+["3390148", { name: "ABELAR, REY", department: "TSD-LER-RIMANDO" }],
+["10881740", { name: "ACLA, RODELO", department: "TSD-TIRE SHOP-CALIWAG" }],
+["3411573", { name: "ACLABOL, MUHAMMAD ALFATIH", department: "TSD-HER-MORTEL" }],
+["3333107", { name: "ACOB, PEFAR", department: "TSD-TIRE SHOP-CALIWAG" }],
+["10479433", { name: "BESALEZ, ANDY", department: "TSD-PMS-SOCRATES" }],
+["9743314", { name: "BUNDAC, MICHAEL", department: "TSD-LER-RIMANDO" }],
+["10479424", { name: "DIAZ, CYROSE", department: "TSD-LER-RIMANDO" }],
+["10895336", { name: "DIONZON, GERARDO", department: "TSD-TIRE SHOP-CALIWAG" }],
+["3239046", { name: "GARADO, MARINO", department: "TSD-WF-DANGANAN" }],
+["3492836", { name: "JALANDONI, LYNDON", department: "TSD-PMS-SOCRATES" }],
+["10896743", { name: "JUANEZA, RICHARD A.", department: "TSD-HER-MORTEL" }],
+["10895339", { name: "LLERA, DONDON V.", department: "TSD-TIRE SHOP-CALIWAG" }],
+["3399021", { name: "MAQUE, JUL-ASIR", department: "TSD-HER-MORTEL" }],
+["3298076", { name: "MIGALLOS, MARK DANIEL G.", department: "TSD-LER-RIMANDO" }],
+["3397567", { name: "MILLIAN, RIONARD J.", department: "TSD-LER-RIMANDO" }],
+["14251745", { name: "MINA, JOSTER M", department: "TSD-OFFICE" }],
+["14250963", { name: "OLORVIDA, MIEL VINCENT E.", department: "TSD-OFFICE" }],
+["3319280", { name: "OPSIAR, MICHAEL G.", department: "TSD-LER-RIMANDO" }],
+["10905583", { name: "RAET, BEKSON D.", department: "TSD-PMS-SOCRATES" }],
+["14255023", { name: "RECIBIDO, RYAN S.", department: "TSD-AE-ROMASANTA" }],
+["6333031", { name: "TALISIC, CLARK C.", department: "TSD-AE-ROMASANTA" }],
+["3243446", { name: "GABUCO, JAYSON", department: "TSD-LER-RIMANDO" }],
+["3259958", { name: "ABLAN, JIMBOY", department: "MEPED" }],
+["10910715", { name: "ADAN, ROSE", department: "MEPED" }],
+["3275708", { name: "ADJUHOD, HERMAN", department: "MEPED" }],
+["3301102", { name: "AGUINALDO, MARDIE", department: "MEPED" }],
+["3315133", { name: "AGUIRRE, TERESA", department: "MEPED" }],
+["10896759", { name: "AGUSTIN, MARY JOY", department: "MEPED" }],
+["6600616", { name: "ALBA, JACK RICHMOND", department: "MEPED" }],
+["9758737", { name: "AMBUAN, NORLITA", department: "MEPED" }],
+["10507762", { name: "AMIL, MOHAMMAD YASER", department: "MEPED" }],
+["6324924", { name: "ANDAM, BEMBOY", department: "MEPED" }],
+["3407434", { name: "ANECITO, ALLAN", department: "MEPED" }],
+["3381839", { name: "ANECITO, RICHARD", department: "MEPED" }],
+["3325959", { name: "ANTOS, ROLAND", department: "MEPED" }],
+["3300499", { name: "AQUIN, NOLI", department: "MEPED" }],
+["3312494", { name: "ARAGDON, JOMER", department: "MEPED" }],
+["14244271", { name: "ASADI BESOY", department: "MEPED" }],
+["3249367", { name: "ASANIL, ALNAJIR", department: "MEPED" }],
+["3286663", { name: "ASKERO, HERNAN", department: "MEPED" }],
+["10888666", { name: "BACOSA, MARJORIE", department: "MEPED" }],
+["3249168", { name: "BADDA, ADZMAR", department: "MEPED" }],
+["12128385", { name: "BALLARBARE, ANTONIO JR", department: "MEPED" }],
+["3248970", { name: "BALLENAS, JHON", department: "MEPED" }],
+["12143906", { name: "BALLENAS, LENARD", department: "MEPED" }],
+["3311852", { name: "BALLESTER, REYMARK", department: "MEPED" }],
+["6332929", { name: "BANGCAYA, MICHAEL", department: "MEPED" }],
+["3286893", { name: "BARTOLOME, EDMON", department: "MEPED" }],
+["14244074", { name: "BATAGON, MARK REYDEN", department: "MEPED" }],
+["6600638", { name: "BERNARDINO, DANIEL-LATEST", department: "MEPED" }],
+["3387681", { name: "BERONIO, REYNANTE", department: "MEPED" }],
+["3380959", { name: "BILANDO, BERNARD", department: "MEPED" }],
+["6324742", { name: "BLANDO, NELSON", department: "MEPED" }],
+["3355246", { name: "BOTON, NARLIZA", department: "MEPED" }],
+["3329260", { name: "CABAHOG, REY", department: "MEPED" }],
+["12111102", { name: "CABAYAO JERICO S", department: "MEPED" }],
+["3379052", { name: "CLAVERIA, JONARD", department: "MEPED" }],
+["9763206", { name: "COYCOY, RAMONALYN", department: "MEPED" }],
+["5683939", { name: "CUEVAS, FELIPE", department: "MEPED" }],
+["3305389", { name: "CUSIN, JOEL", department: "MEPED" }],
+["5807704", { name: "DAGOMBOY, SERAFIN", department: "MEPED" }],
+["5904590", { name: "PANGA, DANTE", department: "MEPED" }],
+["6608461", { name: "DE PEDRO, CHRISTIAN", department: "MEPED" }],
+["12124256", { name: "DE PEDRO, GERALD", department: "MEPED" }],
+["6634768", { name: "DULING, JEMEL", department: "drilling" }],
+["3402482", { name: "ENSAR, DARWIN", department: "MEPED" }],
+["3379245", { name: "ENSAR, JAYPEE", department: "MEPED" }],
+["6600607", { name: "ENSAR, REKEL", department: "MEPED" }],
+["6600695", { name: "ENSAR, RICHARD", department: "MEPED" }],
+["3338955", { name: "EPOK, RANDY", department: "MEPED" }],
+["9644271", { name: "FABILE, MARIBIL", department: "MEPED" }],
+["3345468", { name: "FERRER, JESTONI", department: "MEPED" }],
+["12128594", { name: "FUERTE, JULITO", department: "MEPED" }],
+["6300522", { name: "GALA, FREJIE MARK", department: "MEPED" }],
+["3264134", { name: "GALVAN, NARCISO", department: "MEPED" }],
+["14243683", { name: "GAMAL, RAYMOND", department: "MEPED" }],
+["3379629", { name: "GANDARI, ELVER", department: "MEPED" }],
+["3379437", { name: "GANDARI, JOSEPH", department: "MEPED" }],
+["3394910", { name: "GANDARI, MALVER", department: "MEPED" }],
+["3409831", { name: "GANGANO, FRANKLIN-LATEST", department: "MEPED" }],
+["12110984", { name: "GARCIA, EDDIE-LATEST", department: "MEPED" }],
+["3240485", { name: "HIRIN, UMMAL", department: "MEPED" }],
+["3371630", { name: "HUSSIN, ALRETCHIE", department: "MEPED" }],
+["3319109", { name: "IBRAHIM, ABDULSAID", department: "MEPED" }],
+["5720154", { name: "INTOL, ROBERTO", department: "MEPED" }],
+["3299699", { name: "JAKIL, JORDAN", department: "MEPED" }],
+["6600726", { name: "JALINAN, WELTO", department: "MEPED" }],
+["3272378", { name: "JORILLO, JEBOY", department: "MEPED" }],
+["3325672", { name: "JIMIAN, MICHAEL M.", department: "MEPED" }],
+["3320689", { name: "JULAYDE, TIMI S.", department: "MEPED" }],
+["5809767", { name: "LAGRADA, GEMMALYN", department: "MEPED" }],
+["3316239", { name: "LAGTIKAN, JEKSON", department: "MEPED" }],
+["3421929", { name: "LAMBOJON, RICO M.", department: "MEPED" }],
+["1358968", { name: "LAURON, LAZARO", department: "MEPED" }],
+["11080699", { name: "LEDESMA, CONRADO", department: "MEPED" }],
+["3398583", { name: "LEDESMA, MARIEL G.", department: "MEPED" }],
+["6597751", { name: "LIBO-ON, MELL ANGELO", department: "MEPED" }],
+["3358490", { name: "LINSAO, JULIO M.", department: "MEPED" }],
+["9758739", { name: "LINSAO, MAIRALYN", department: "MEPED" }],
+["3340086", { name: "LINSAO, MICHAEL", department: "MEPED" }],
+["6320847", { name: "LINSAO, SONNY", department: "MEPED" }],
+["3335475", { name: "LUCADAN, MARVEN A.", department: "MEPED" }],
+["6600728", { name: "MASTALANI, GEORGE", department: "MEPED" }],
+["11060174", { name: "MACARIO, VICTOR", department: "MEPED" }],
+["9763204", { name: "MAHAYANG, JONATHAN", department: "MEPED" }],
+["3380773", { name: "MALIK, DENNIS", department: "MEPED" }],
+["3402068", { name: "MARTEJA, JEREMY P.", department: "MEPED" }],
+["3301044", { name: "MASENDO, BERNARD F.", department: "MEPED" }],
+["6350726", { name: "MASENDO, BRYAN F.", department: "MEPED" }],
+["9758741", { name: "MECRAY, MERLITO", department: "MEPED" }],
+["6339574", { name: "MESNAY, RANIEL L.", department: "MEPED" }],
+["10804318", { name: "MESNAY, RANIEL L.1", department: "MEPED" }],
+["4766848", { name: "MESNAY, RELON", department: "MEPED" }],
+["12143750", { name: "MILLENDEZ, DENNIS-LATEST", department: "MEPED" }],
+["3377507", { name: "MINSAG, ROBERTO A.", department: "MEPED" }],
+["3410046", { name: "MOHAMMAD, JOHAIDI M.", department: "MEPED" }],
+["3410245", { name: "NAVARRA, JERIC", department: "MEPED" }],
+["3290072", { name: "OMAR, SHANA M.", department: "MEPED" }],
+["14196742", { name: "ONGCAL, GLADY MEL", department: "MEPED" }],
+["9796942", { name: "ONGCAL, MELINDA", department: "MEPED" }],
+["9815243", { name: "PARENTE, JENEL", department: "MEPED" }],
+["3423787", { name: "PIS, LEMUEL O.", department: "MEPED" }],
+["10909795", { name: "PIS, RICHARD", department: "MEPED" }],
+["9815244", { name: "PUPONG, DAYSON", department: "MEPED" }],
+["3325407", { name: "RAGMAC, EUNELYN U.", department: "MEPED" }],
+["3269116", { name: "RAMAYLA, JONIE", department: "MEPED" }],
+["6330259", { name: "BARTOLOME, RANDY", department: "MEPED" }],
+["3277483", { name: "RANSARAN JERIC", department: "MEPED" }],
+["3248773", { name: "RICARE HAGIBIS", department: "MEPED" }],
+["3318741", { name: "RODRIGUEZ, RENELYN E.", department: "MEPED" }],
+["1337944", { name: "RONAS, MARK JIVEN", department: "MEPED" }],
+["6608519", { name: "SALI, DIETHER", department: "MEPED" }],
+["6608487", { name: "SANCLARIA, HAZEL G.", department: "MEPED" }],
+["3397204", { name: "SANTILLAN, ELMER A.", department: "MEPED" }],
+["3380398", { name: "SANTILLAN, ELPIDIO", department: "MEPED" }],
+["3380586", { name: "SAPI, JERNALD", department: "MEPED" }],
+["3397389", { name: "SARAN, ERMIL M.", department: "MEPED" }],
+["3405431", { name: "SARAN, ERNIL M.", department: "MEPED" }],
+["3351206", { name: "SEMPIDES, GILBERT D.", department: "MEPED" }],
+["6599955", { name: "SIBI, JESS", department: "MEPED" }],
+["3322449", { name: "SOLANA, RONIEL CAPANAS", department: "MEPED" }],
+["3351133", { name: "SURAMAY, ROLDAN B.", department: "MEPED" }],
+["3351065", { name: "TABOK, JELNA M.", department: "MEPED" }],
+["3317258", { name: "TABOK, JONNY G.", department: "MEPED" }],
+["3404371", { name: "TABOK, REXSON M.", department: "MEPED" }],
+["3404577", { name: "TABOK, RODGIE M.", department: "MEPED" }],
+["3346962", { name: "TABOK, RUDY", department: "MEPED" }],
+["14243878", { name: "TANDING NEVEN", department: "MEPED" }],
+["3403127", { name: "TINCATAN, ALJON", department: "MEPED" }],
+["3327732", { name: "TINGCATAN, NELTO", department: "BENEFICIATION-ROMEL" }],
+["3320870", { name: "TUCANG, CARLITO", department: "MEPED" }],
+["9763203", { name: "TULANG, RONILLO", department: "MEPED" }],
+["10905628", { name: "UBOGAN, CRISANTO", department: "MEPED" }],
+["10914600", { name: "UBOGAN, LOUIE", department: "MEPED" }],
+["3355269", { name: "URDELAS, JOHN PAUL A.", department: "MEPED" }],
+["3351451", { name: "VILLABERDE, MARJORIE D.", department: "MEPED" }],
+["3351366", { name: "YAMSON, MICHAEL O.", department: "MEPED" }],
+["4751277", { name: "HATRAN S. BAIRULLA", department: "MINE DIVISION-OFFICE" }],
+["5810703", { name: "ROSERO, ELMO", department: "MINE DIVISION-OFFICE" }],
+["6627811", { name: "ALONTO, NHEIL", department: "MINE ENGINEERING" }],
+["10801874", { name: "ANGGI, JARLENE", department: "MINE ENGINEERING" }],
+["6300693", { name: "BARBA, ROGER JR.", department: "MINE ENGINEERING" }],
+["11030843", { name: "CAMPOS, JACILY MAY", department: "MINE ENGINEERING" }],
+["11050854", { name: "CAMPOS, RODOLFO JR.", department: "MINE ENGINEERING" }],
+["9806789", { name: "CANEDA, KRISTHYL MAE", department: "MINE ENGINEERING" }],
+["3300020", { name: "DAKAY, JESSICA", department: "MINE ENGINEERING" }],
+["1335907", { name: "FAREN, JONIEL", department: "MINE ENGINEERING" }],
+["10800178", { name: "INDANAN, MULIRAN", department: "MINE ENGINEERING" }],
+["9710753", { name: "JAVA, JEOFFREY JR.", department: "MINE ENGINEERING" }],
+["3741760", { name: "LAGRADA, WILLIAM", department: "MINE ENGINEERING" }],
+["10882504", { name: "MAGBITANG, JHON ROBERT", department: "MINE ENGINEERING" }],
+["12097965", { name: "MONLEON, SHANNEN MARIE", department: "MINE ENGINEERING" }],
+["11071816", { name: "REYES, FREHNAND", department: "MINE ENGINEERING" }],
+["11084391", { name: "SABRIN, PARAYAL", department: "MINE ENGINEERING" }],
+["10507669", { name: "SAHEJOL, ABDURAMAN", department: "MINE ENGINEERING" }],
+["9853687", { name: "SINAY, JERWIN", department: "MINE ENGINEERING" }],
+["3296107", { name: "VIAJEDOR, ROBERTO", department: "MINE ENGINEERING" }],
+["9777414", { name: "BOBIS, JOENEL", department: "MINE ENGINEERING" }],
+["11030854", { name: "ABORDONADO, JOMAR", department: "MINE ENG-SURVEY" }],
+["3320319", { name: "AGUIRRE, GERALD", department: "MINE ENG-SURVEY" }],
+["3335887", { name: "ALAYON, ARNULFO JR.", department: "MINE ENG-SURVEY" }],
+["3322191", { name: "ALIE, ABADELLA M.", department: "MINE ENG-SURVEY" }],
+["10507684", { name: "BAMBICO, RICHARD", department: "MINE ENG-SURVEY" }],
+["9788373", { name: "BESIDA, GERIEL", department: "MINE ENG-SURVEY" }],
+["5800506", { name: "CASIANO, BERNIDO", department: "MINE ENG-SURVEY" }],
+["12128803", { name: "DENNIS BATAGON", department: "MINE ENG-SURVEY" }],
+["5791350", { name: "EDILLORANA, VICTOR", department: "MINE ENG-SURVEY" }],
+["9633387", { name: "ESTORCO, JOEL", department: "MINE ENG-SURVEY" }],
+["3395617", { name: "GAMOS, MARK DARYL", department: "MINE ENG-SURVEY" }],
+["3411464", { name: "GAPILANGO, RICKY", department: "MINE ENG-SURVEY" }],
+["3328758", { name: "IDULOG, KEVEN", department: "MINE ENG-SURVEY" }],
+["3403242", { name: "LINSAO, MICHAEL M.", department: "MINE ENG-SURVEY" }],
+["11030925", { name: "MANING, LITO", department: "MINE ENG-SURVEY" }],
+["5791563", { name: "MATE, EMMANUEL", department: "MINE ENG-SURVEY" }],
+["3323368", { name: "MATEO, JOMAR B.", department: "MINE ENG-SURVEY" }],
+["3326316", { name: "ORDINARIO, ALAN JESSIE R", department: "MINE ENG-SURVEY" }],
+["3350998", { name: "PERALTA, JUVER S.", department: "MINE ENG-SURVEY" }],
+["3398808", { name: "SAIPULA, ALDAZIER M.", department: "MINE ENG-SURVEY" }],
+["10863734", { name: "SALI, KADIR", department: "MINE ENG-SURVEY" }],
+["3396561", { name: "TEJADA, EDEL", department: "MINE ENG-SURVEY" }],
+["3426186", { name: "UBOGAN, EDGAR JR.", department: "MINE ENG-SURVEY" }],
+["9733557", { name: "RIOVEROS, RHOYLAN", department: "MINE OFFICE" }],
+["12127805", { name: "ASDORAP, JENEBOY", department: "PIT-RAUL" }],
+["3370186", { name: "ASEROL, GELBERT-LATEST", department: "BENEFICIATION" }],
+["12144951", { name: "INAO, DIOSCORO JR", department: "BENEFICIATION-ROMEL" }],
+["12128176", { name: "LOCSIN, NOEL (NEW)", department: "BENEFICIATION-ROMEL" }],
+["3338236", { name: "LOBRIO, NOLI", department: "BENEFICIATION-ROMEL" }],
+["12095959", { name: "SABORNIDO, EDDIE", department: "PIT-RAUL" }],
+["5785288", { name: "DAMSA, MUAMMAR-LATEST", department: "MINE PRODUCTION" }],
+["14911659", { name: "ADVIENTO, LEOARD JAY", department: "MINING" }],
+["10507662", { name: "ASCARI, JULITO", department: "MINING" }],
+["9876409", { name: "PEDIGAN, ERNESTO", department: "MINING" }],
+["5811525", { name: "RELON, MANUEL", department: "MINING" }],
+["3743153", { name: "RONAS, REYNALDO", department: "MINING" }],
+["11030940", { name: "UNTOLAN, ERNESTO", department: "MINING" }],
+["10515422", { name: "CAROROCAN, BANJO", department: "MRRU" }],
+["10485306", { name: "CATADMAN, JOVENCIO JR", department: "MRRU" }],
+["10887561", { name: "MACEDA, RONNIE", department: "MRRU" }],
+["5552846", { name: "MANI, JAKE", department: "MRRU" }],
+["10884422", { name: "MASANGKAY, LAILA GAY", department: "MRRU" }],
+["10887773", { name: "RECLA, DANTE", department: "MRRU" }],
+["10881726", { name: "ILANGAN, JAEYLOR", department: "MRRU" }],
+["3738433", { name: "JALOCON, VILMA", department: "OFFICE OF THE MANAGER" }],
+["10884400", { name: "SANTOS, MARVIN", department: "OHN" }],
+["12111222", { name: "ASNOLA, SAID", department: "POWER-ELECTRICAL" }],
+["12111984", { name: "VELASCO, KEVIN JOHN", department: "POWER-ELECTRICAL" }],
+["9812183", { name: "ABDURAJAK, JACOB S.", department: "BENEFICIATION-ROMEL" }],
+["9872928", { name: "ABDURASID, ORNAR", department: "PIT-RAUL" }],
+["10799149", { name: "ACOB, ADZMEIER YASHEIR", department: "PIT OPERATION" }],
+["11051289", { name: "ACOSTA, KYLE", department: "PIT-RAUL" }],
+["3739931", { name: "ADJED, BAFET", department: "BENEFICIATION-STANLY" }],
+["9694471", { name: "AGUILAR, FREDDIE", department: "BARGE LOADING-MADRID" }],
+["12128430", { name: "ALCAIDE, RYAN", department: "PIT-RAUL" }],
+["5811678", { name: "AMPALA, VIRGEL", department: "BENEFICIATION-ROMEL" }],
+["11047886", { name: "ARADO, GILBERT", department: "BENEFICIATION-ROMEL" }],
+["1340207", { name: "ARGUEZA, ALLEN", department: "PIT OPERATION" }],
+["14269099", { name: "ARINEZ, ARNULFO", department: "LIMONITE-BETH" }],
+["5808632", { name: "ARTILAHON, ROSALITO", department: "PIT-RAUL" }],
+["3455217", { name: "ASGALI, MICHAEL", department: "BARGE LOADING-MADRID" }],
+["1356274", { name: "ASIL, REDJAN", department: "PIT OPERATION" }],
+["5804533", { name: "AUSAN, MAMERTO B.", department: "BENEFICIATION-ROMEL" }],
+["10516505", { name: "BADILLES, RICO", department: "PIT-RAUL" }],
+["10815882", { name: "BALOLOY, ANTONIO", department: "PIT OPERATION" }],
+["11068147", { name: "BANAAG, BERNIE", department: "PIT OPERATION" }],
+["1356220", { name: "BANI, MOHAIMEEN", department: "PIT OPERATION" }],
+["9817315", { name: "BARRAMEDA, RIO JUNE", department: "BENEFICIATION-ROMEL" }],
+["1364504", { name: "BASAN, JEFFREY", department: "PIT-RAUL" }],
+["11047910", { name: "BELANDO, MICHAEL", department: "PIT OPERATION" }],
+["10874711", { name: "BELENARIO, ROLANDO", department: "BENEFICIATION-ROMEL" }],
+["10871561", { name: "BERINGUELA, ALEXANDER", department: "BENEFICIATION-ROMEL" }],
+["9671627", { name: "BOBIS, LUTH", department: "PIT OPERATION" }],
+["11036692", { name: "BOHOL, JONALD", department: "PIT OPERATION" }],
+["11030916", { name: "BOQUENA, EDWIN", department: "PIT-RAUL" }],
+["11027755", { name: "BULAT-AG, REYMARK", department: "PIT OPERATION" }],
+["11052445", { name: "BUNDING, ALJABBAR", department: "PIT OPERATION" }],
+["11081843", { name: "BUNDING, MURPHY", department: "PIT-RAUL" }],
+["3301596", { name: "CADUCOY, ARTHUR JR.", department: "BENEFICIATION-ROMEL" }],
+["3753343", { name: "CADUSALE, RODRIGO", department: "BARGE LOADING-MADRID" }],
+["11047938", { name: "CALINGAO, GIL", department: "BENEFICIATION-ROMEL" }],
+["9680444", { name: "CANAY, DANTE", department: "BENEFICIATION-ROMEL" }],
+["5804217", { name: "CATIPAY, JONAS", department: "BENEFICIATION-ROMEL" }],
+["10907897", { name: "CERILLO, ZARFIEL", department: "PIT-RAUL" }],
+["9716532", { name: "COMPESINO, IAN DAVE", department: "BARGE LOADING-RONEX" }],
+["10177984", { name: "CORTEZ, ANTHONY", department: "PIT OPERATION" }],
+["9853691", { name: "DALEON, JEFFREY WILSON", department: "BARGE LOADING-MADRID" }],
+["2110237", { name: "DECOLONGON, REDENTOR", department: "BENEFICIATION-ROMEL" }],
+["11042049", { name: "DECOLONGON, VICTOR", department: "PIT-RAUL" }],
+["1333112", { name: "DELA TORRE, RAUL", department: "PIT-RAUL" }],
+["9644600", { name: "DELFINADO, RASTY", department: "BENEFICIATION-ROMEL" }],
+["2073889", { name: "DELOS SANTOS, JERRY", department: "BENEFICIATION-ROMEL" }],
+["1359200", { name: "DENZON, MELVIN", department: "PIT OPERATION" }],
+["9644599", { name: "DIANO, RUBEN", department: "PIT OPERATION" }],
+["11047895", { name: "DIDIK, MIKE", department: "PIT OPERATION" }],
+["9706712", { name: "DOMINGO, ROWELL", department: "PIT OPERATION" }],
+["12095755", { name: "DONATO LICUAS", department: "PIT OPERATION" }],
+["11055100", { name: "DOTON, DANIEL", department: "BENEFICIATION-ROMEL" }],
+["11035038", { name: "DUJALI, JOHNNY", department: "BENEFICIATION-ROMEL" }],
+["10891951", { name: "EDDONG, LIDAYIN", department: "PIT-RAUL" }],
+["9635580", { name: "ELEFANE, RUFINO JR", department: "PIT-RAUL" }],
+["11047939", { name: "ENDING, JOELITO", department: "PIT OPERATION" }],
+["5804410", { name: "ENIOSAN, JOVITO", department: "BENEFICIATION-STANLY" }],
+["10869975", { name: "ENONG, HAMIRAN", department: "PIT OPERATION" }],
+["9811710", { name: "ESCANER, FERNIE", department: "PIT OPERATION" }],
+["9853689", { name: "ESCOLTOR, ALLAN", department: "BENEFICIATION-ROMEL" }],
+["3442513", { name: "ESCOLTOR, RONALD", department: "BARGE LOADING-MADRID" }],
+["3555157", { name: "ESCOLTOR, VICTOR", department: "PIT OPERATION" }],
+["10891518", { name: "ESTIGOY, RANDY", department: "PIT OPERATION" }],
+["1356203", { name: "ESTOPEN, JASON", department: "PIT OPERATION" }],
+["9635274", { name: "GABAYNO, NOLAN", department: "PIT OPERATION" }],
+["11066723", { name: "GABINETE, JEFFRIC JOHN", department: "PIT-RAUL" }],
+["11044129", { name: "GABO, ROMMEL", department: "PIT OPERATION" }],
+["9777417", { name: "GALICIA, NORCILITO", department: "BENEFICIATION-ROMEL" }],
+["9669778", { name: "GALICIA, ROBERT", department: "PIT OPERATION" }],
+["10878762", { name: "GANGOSO, GEROME", department: "PIT OPERATION" }],
+["10914618", { name: "GARCIA, FREDERICK", department: "PIT-RAUL" }],
+["3322644", { name: "GARCIA, JULIUS VINCENT", department: "BENEFICIATION-ROMEL" }],
+["10889771", { name: "GUALON, RODELIO", department: "PIT OPERATION" }],
+["10876408", { name: "GUJILDE, DIOSDADO", department: "PIT-RAUL" }],
+["9743323", { name: "HERNANDEZ, SAMSON", department: "BENEFICIATION-STANLY" }],
+["12124717", { name: "HERNANDEZ, JUNEL", department: "PIT-RAUL" }],
+["9639563", { name: "IBRAHIM, BARSHARIF", department: "PIT OPERATION" }],
+["11034782", { name: "ISMAEL, EBNO HASSIN", department: "PIT OPERATION" }],
+["1346494", { name: "ISMAEL, LITO", department: "PIT OPERATION" }],
+["9639560", { name: "JALIKIN, WILBE", department: "PIT OPERATION" }],
+["12096568", { name: "ORACOY, JOMAR", department: "LIMONITE-BALMES" }],
+["9809705", { name: "KAHAL, ADZROY B.", department: "BARGE LOADING-MADRID" }],
+["14262694", { name: "LANZADERAS, JAKE F.", department: "BENEFICIATION-STANLY" }],
+["11066679", { name: "LANZADERAS, JAN MARIE GIL", department: "BENEFICIATION-ROMEL" }],
+["1356176", { name: "LAURON, FRANK", department: "PIT OPERATION" }],
+["10874706", { name: "LIWANAG, ROMEO", department: "PIT OPERATION" }],
+["9743317", { name: "LLACUNA, ROLANDO", department: "PIT OPERATION" }],
+["1388396", { name: "MAESTRAL, REYNALD", department: "BENEFICIATION-ROMEL" }],
+["3455790", { name: "MAIDAN, LOTCHIL", department: "BARGE LOADING-MADRID" }],
+["3455600", { name: "MARCAIDA, POLICRONIO S.", department: "PIT-RAUL" }],
+["3720545", { name: "MASINDO, JHAN MARK D.", department: "PIT OPERATION" }],
+["3763663", { name: "MIJARES, NOLIE F.", department: "BENEFICIATION-ROMEL" }],
+["11035799", { name: "MILITAR, CHARLIE", department: "PIT OPERATION" }],
+["3449409", { name: "MONDEJAR, JERSON", department: "BENEFICIATION-ROMEL" }],
+["10487743", { name: "MORALES,  JOEY", department: "PIT-RAUL" }],
+["9632790", { name: "NACIONALES, ROMEL", department: "BENEFICIATION-ROMEL" }],
+["11027772", { name: "NATIVIDAD, GILL", department: "PIT-RAUL" }],
+["9722361", { name: "NAVARRO, EDDIE S.", department: "PIT-RAUL" }],
+["11083542", { name: "OLPINA, ANDY", department: "PIT OPERATION" }],
+["1335723", { name: "OREMO, JOJO", department: "PIT OPERATION" }],
+["11082174", { name: "ORTEZ, JOVENCIO JR", department: "PIT OPERATION" }],
+["10815893", { name: "PACHECO, EMIL", department: "BENEFICIATION-ROMEL" }],
+["9775961", { name: "PARAISO, CLAID VINCENT", department: "PIT-RAUL" }],
+["9759085", { name: "PIS, BEN S.", department: "PIT OPERATION" }],
+["9759088", { name: "PULVERA, GLENN O.", department: "PIT-RAUL" }],
+["10898370", { name: "RABANES, RONALDO N.", department: "PIT-RAUL" }],
+["12126765", { name: "RESOS, ROLLY", department: "PIT OPERATION" }],
+["1331827", { name: "RESUS, ROLLY", department: "PIT-RAUL" }],
+["12127344", { name: "ORENCIO, REY-AN", department: "BENEFICIATION-ROMEL" }],
+["11064014", { name: "REYES, JAY-AR", department: "PIT OPERATION" }],
+["12127389", { name: "ROMERO, RJ BOY", department: "PIT-RAUL" }],
+["1315608", { name: "SALI, USOP", department: "PIT OPERATION" }],
+["9743321", { name: "SINGGIN, ROLESIO A.", department: "BENEFICIATION-ROMEL" }],
+["12126305", { name: "SINILONG RAMIL", department: "PIT-RAUL" }],
+["10489060", { name: "SINTONG, JORNAL", department: "BARGE LOADING-RONEX" }],
+["1338034", { name: "SOLERO, RANDY", department: "PIT-RAUL" }],
+["11021575", { name: "SOLERO, RUBEN", department: "BENEFICIATION-ROMEL" }],
+["3394087", { name: "SORIA, KIRBY GASQUE", department: "BENEFICIATION-ROMEL" }],
+["10799372", { name: "SUAIB, ABNER", department: "PIT-RAUL" }],
+["11071693", { name: "SUSUSCO, FREDERICO", department: "PIT-RAUL" }],
+["11021310", { name: "TABULOD, RENANTE", department: "BENEFICIATION-ROMEL" }],
+["11082081", { name: "TAGLE, LEO", department: "PIT OPERATION" }],
+["3287304", { name: "TIMI, BOBBY", department: "PIT-RAUL" }],
+["15054350", { name: "TINGCATAN, MARK", department: "PIT OPERATION" }],
+["3327997", { name: "TORIBIO, PRINCE JOHN S.", department: "PIT OPERATION" }],
+["9639558", { name: "TRONGCO, JOSEPH", department: "BENEFICIATION-ROMEL" }],
+["10804341", { name: "TUMALON, ALBERT", department: "BENEFICIATION-ROMEL" }],
+["15006157", { name: "VENTURA, MIGUEL JR", department: "PIT-RAUL" }],
+["9710754", { name: "VIAJEDOR, RONNIE A.", department: "BARGE LOADING-MADRID" }],
+["10877504", { name: "VILLAFLOR, JULIAN", department: "PIT OPERATION" }],
+["5811480", { name: "VILLAR, RONIEL B. ", department: "PIT-RAUL" }],
+["9702562", { name: "ABELA, SONNIE", department: "POLLUTION CONTROL SECTION" }],
+["10889511", { name: "ANASCO, LEAH", department: "POLLUTION CONTROL SECTION" }],
+["10898940", { name: "BACONGGA, JOSELYN", department: "POLLUTION CONTROL SECTION" }],
+["9644268", { name: "CARING, DIVINA", department: "POLLUTION CONTROL SECTION" }],
+["10500634", { name: "DAGUIA, JOY", department: "POLLUTION CONTROL SECTION" }],
+["5573159", { name: "HASIM, ANALYN", department: "POLLUTION CONTROL SECTION" }],
+["10863701", { name: "MAMUNGAY, JAKE", department: "POLLUTION CONTROL SECTION" }],
+["9770494", { name: "NANTE, JONA", department: "POLLUTION CONTROL SECTION" }],
+["9796945", { name: "NANTE, MARETCHA", department: "POLLUTION CONTROL SECTION" }],
+["9815254", { name: "PINERO, DEO DOMINIC C.", department: "POLLUTION CONTROL SECTION" }],
+["10900383", { name: "PIS, JENJE", department: "POLLUTION CONTROL SECTION" }],
+["9703428", { name: "ACOB, DEXTER", department: "POWER-ELECTRICAL" }],
+["4654291", { name: "AGUILAR, MANUEL", department: "POWER-ELECTRICAL" }],
+["1353155", { name: "AMBAN, MARIO", department: "POWER-ELECTRICAL" }],
+["1341438", { name: "ARQUERO, EDUARDO", department: "POWER-ELECTRICAL" }],
+["5800523", { name: "BAHANDE, GLENLY K. ", department: "POWER-ELECTRICAL" }],
+["11085513", { name: "BARORO, HERNAND", department: "POWER-ELECTRICAL" }],
+["10862876", { name: "CUALING, EVER", department: "POWER-ELECTRICAL" }],
+["9743319", { name: "GARADO, PONCIANO", department: "POWER-ELECTRICAL" }],
+["10908231", { name: "JAVAREZ, FRANCIS JOHN", department: "POWER-ELECTRICAL" }],
+["4646949", { name: "MACABUTAS, RODERICK G", department: "POWER-ELECTRICAL" }],
+["1353188", { name: "MANGUERA, JOHN JEFFREY", department: "POWER-ELECTRICAL" }],
+["1353177", { name: "PAGAYON, NORIEL B. ", department: "POWER-ELECTRICAL" }],
+["3287359", { name: "PERALTA, RUEL P.", department: "POWER-ELECTRICAL" }],
+["11029118", { name: "SANDOY, JOEL", department: "POWER-ELECTRICAL" }],
+["11034969", { name: "SUARNABA, MARTHEN", department: "POWER-ELECTRICAL" }],
+["10896295", { name: "TERAPAN, JERALD C. ", department: "POWER-ELECTRICAL" }],
+["4667798", { name: "VELASCO, RANDY", department: "POWER-ELECTRICAL" }],
+["11013986", { name: "VERGARA, EDGARDO", department: "POWER-ELECTRICAL" }],
+["11051286", { name: "BUNGAY, RUBEN", department: "PSCM" }],
+["3324624", { name: "COJA, TERSO", department: "PSCM" }],
+["10863730", { name: "COMPESINO, RIO ANDREW", department: "TSD-OFFICE" }],
+["1342780", { name: "DUAZO, NECENT", department: "PSCM" }],
+["10806717", { name: "GAGANAO, SIMON", department: "PSCM" }],
+["10871601", { name: "GANGANO, FRANKLIN", department: "MEPED" }],
+["10804251", { name: "GOMEZ, MARLON", department: "PSCM" }],
+["11051441", { name: "MAHINAY, JHONCIEL", department: "PSCM" }],
+["4672877", { name: "MANZANO, CHARMLEY", department: "PSCM" }],
+["10806736", { name: "MILITAR, RAYMOND", department: "PSCM" }],
+["5807748", { name: "OMPAD, ARBED", department: "PSCM" }],
+["10261878", { name: "PADILLA, OSBORN", department: "PSCM" }],
+["1378972", { name: "PEDIGAN, RICARDO", department: "PSCM" }],
+["11051308", { name: "SADONGDONG, ROMMEL", department: "PSCM" }],
+["11051487", { name: "SALAZAR, RICHARD", department: "PSCM" }],
+["9694470", { name: "TISOY, MARCOS", department: "PSCM" }],
+["10889790", { name: "BAGONGON, ELIAS", department: "PUERTO LIAISON OFFICE" }],
+["11029317", { name: "BERNAL, RAYMUNDO", department: "PUERTO LIAISON OFFICE" }],
+["3381328", { name: "ADDIMAN, BIMBOY", department: "PURCHASING" }],
+["9710804", { name: "DIOGENES, ILDEFONSO JR.", department: "PURCHASING" }],
+["10896273", { name: "REBATO, KRYSTEL JOY", department: "PURCHASING" }],
+["10881674", { name: "ALMONTE, ERLENE", department: "OHN" }],
+["11051326", { name: "ARGON, BIMBO G.", department: "SAFETY" }],
+["11052534", { name: "AVESTRUZ, RAYMAN", department: "SAFETY" }],
+["1353143", { name: "BALINO, BERNARD", department: "SAFETY" }],
+["10871432", { name: "BUCSIT, ALLEN", department: "SAFETY" }],
+["10898927", { name: "CANTANO, JONATHAN", department: "SAFETY" }],
+["3338972", { name: "CUARIO, LORIEFE", department: "SAFETY" }],
+["10933957", { name: "DE LEON, ANNA LIGAYA", department: "SAFETY" }],
+["9859502", { name: "DIESTRO, RODEL", department: "SAFETY-ARFF" }],
+["5800327", { name: "DOROTEO, ELOISA", department: "SAFETY" }],
+["10871410", { name: "AVESTRUZ, CATHERINE", department: "SAFETY" }],
+["10881516", { name: "HAEL, RICHARD", department: "SAFETY" }],
+["11030953", { name: "MAGALLANES, RICKY", department: "SAFETY" }],
+["11030948", { name: "MARCOS, STEVE", department: "SAFETY-ARFF" }],
+["11051333", { name: "MILLIAN, GRACE", department: "SAFETY" }],
+["5802319", { name: "NATAD, SHERY LYN", department: "SAFETY" }],
+["11013983", { name: "PANES, DAVID", department: "SAFETY-ARFF" }],
+["5800310", { name: "PIZARRO, JEFREY", department: "SAFETY" }],
+["11085533", { name: "ROSARIO, JULIET", department: "SAFETY" }],
+["11051304", { name: "SABADO, IGNACIO", department: "SAFETY" }],
+["10889833", { name: "TATEL, JHON-ART", department: "COMREL" }],
+["10867256", { name: "VERZOLA, OGILCIS", department: "SAFETY" }],
+["5804492", { name: "VIACRUCIS, JOCELIA", department: "OHN" }],
+["3287035", { name: "ALFEREZ ANTONIO JR", department: "SAPROLITE" }],
+["11052467", { name: "ALILI, ALLAN", department: "SAPROLITE" }],
+["4659429", { name: "BERNAS, EDUMAR", department: "SAPROLITE" }],
+["12133288", { name: "CAMPUS, JIMMY", department: "BENEFICIATION-ROMEL" }],
+["10858890", { name: "JANNUL, ESLIE", department: "SAPROLITE" }],
+["1342773", { name: "KIOS, SIANO", department: "SAPROLITE" }],
+["10807948", { name: "PAMILAGA, JAYSON", department: "SAPROLITE" }],
+["1312583", { name: "ROMERO, PRINCE MARK", department: "SAPROLITE" }],
+["9743313", { name: "CONTA, JOSEPH DOMINIC", department: "SECURITY" }],
+["4752938", { name: "JABILLO, WALTER", department: "SECURITY" }],
+["1342858", { name: "LONTES, JONNAMAE", department: "SECURITY" }],
+["11050732", { name: "MENDOZA, JEROME JAKE", department: "SECURITY" }],
+["9701419", { name: "REBATO, MARK ANTHONY", department: "SECURITY" }],
+["14879660", { name: "VELASCO, MICHAEL", department: "SECURITY" }],
+["10896286", { name: "GALLARDO, JONAS DEO ", department: "SECURITY CCTV'S" }],
+["12111852", { name: "CASTILLO, CHARITY", department: "SECURITY CCTV'S" }],
+["6320722", { name: "BARORO, KIRK PATHRICK", department: "SECURITY CCTV'S" }],
+["3574181", { name: "AVESTRUZ, MARY JOY S.", department: "SPECIAL PROJECT" }],
+["15050720", { name: "BANGGAY, FREDERICK", department: "SPECIAL PROJECT" }],
+["3735817", { name: "EPPIE, ABDUL", department: "SPECIAL PROJECT" }],
+["5818799", { name: "GORDO, JONATHAN", department: "SPECIAL PROJECT" }],
+["4664557", { name: "LASAPIN, RICHARD", department: "SPECIAL PROJECT" }],
+["10500131", { name: "LINSAO, NOLDING", department: "SPECIAL PROJECT" }],
+["10493087", { name: "PAREDES, JAMES TAN", department: "SPECIAL PROJECT" }],
+["15050698", { name: "TOLENTINO, ELMER", department: "SPECIAL PROJECT" }],
+["10516387", { name: "TULANG, BERNESIO", department: "SPECIAL PROJECT" }],
+["12127597", { name: "PERALTA, JUDY JR", department: "SURVEY" }],
+["1342758", { name: "ALISUAG, JOVEN", department: "TRANSPORT" }],
+["6608417", { name: "ANGELES, ROGELIO", department: "TRANSPORT" }],
+["11015009", { name: "ANZA, GEORGIE", department: "TRANSPORT" }],
+["11085199", { name: "ASPIRAS, WILLIAM", department: "TRANSPORT" }],
+["9716624", { name: "BADUA, NELSON", department: "TRANSPORT" }],
+["1332438", { name: "BANAAG, RICHARD VON", department: "TRANSPORT" }],
+["3714422", { name: "BASILISCO,  DIOSDADO", department: "TRANSPORT" }],
+["10887766", { name: "BONGANSISO, JUANITO", department: "TRANSPORT" }],
+["1344512", { name: "CORDERO, ARIEL", department: "TRANSPORT" }],
+["10871645", { name: "CUIZON, RICHARD", department: "TRANSPORT" }],
+["11076101", { name: "GALLO, MARK ANTHONY", department: "TRANSPORT" }],
+["11048343", { name: "GANADOS, ISMAEL", department: "TRANSPORT" }],
+["6597384", { name: "GARCIA, ARGIE", department: "TRANSPORT" }],
+["9853695", { name: "HAMID, JAMRI", department: "TRANSPORT" }],
+["3338280", { name: "JALOCON, EROS", department: "TRANSPORT" }],
+["10500411", { name: "LABRADO, WENZELLE", department: "TRANSPORT" }],
+["11084530", { name: "ONGCAL, MARK IAN", department: "TRANSPORT" }],
+["9680442", { name: "PASTERA, SAMUEL", department: "TRANSPORT" }],
+["10896189", { name: "QUEZADA, ROMEO", department: "TRANSPORT" }],
+["11076303", { name: "RONAS, ROLAN", department: "TRANSPORT" }],
+["10898268", { name: "ROSAS, VICENTE", department: "TRANSPORT" }],
+["5908571", { name: "ROSAS, VICENTE-LATEST", department: "TRANSPORT" }],
+["10866458", { name: "SALVADOR, JULIANO", department: "TRANSPORT" }],
+["10500256", { name: "SOMOZA, ANGELO", department: "TRANSPORT" }],
+["3757164", { name: "VILLARIN, CRESENCIO", department: "TRANSPORT" }],
+["11069332", { name: "CUIZON, ARNOLD", department: "TSD-LER-RIMANDO" }],
+["4673653", { name: "DAMASCO, GILBERT", department: "TSD-LER-RIMANDO" }],
+["4656519", { name: "DELA VEGA, DOMINADOR JR.", department: "TSD-LER-RIMANDO" }],
+["9674154", { name: "GONZALES, NOEL", department: "TSD-LER-RIMANDO" }],
+["4676816", { name: "LLARENA, ALDRINO", department: "TSD-HER-MORTEL" }],
+["4647072", { name: "MAMUNGAY, BRENDO", department: "TSD-HER-MORTEL" }],
+["11037365", { name: "MENESES, ARNEL", department: "TSD-LER-RIMANDO" }],
+["10876224", { name: "RIMANDO, SILVERIO", department: "TSD-ASSEMBLY OVERHAULING" }],
+["11028014", { name: "ROSE, JERSON", department: "TSD-LER-RIMANDO" }],
+["10516374", { name: "TAMIDAO, NESTOR", department: "TSD-HER-MORTEL" }],
+["4673416", { name: "BULAC, GIDEON", department: "TSD-AE-ROMASANTA" }],
+["10877528", { name: "CALDERON, JONATHAN", department: "TSD-AE-ROMASANTA" }],
+["10881713", { name: "DALIDA, HERNANE", department: "TSD-AE-ROMASANTA" }],
+["11027992", { name: "ESTORCO, JERIC", department: "TSD-AE-ROMASANTA" }],
+["11039807", { name: "GINES, MADSALI", department: "TSD-AE-ROMASANTA" }],
+["11029676", { name: "HERAMIS, MATT", department: "TSD-AE-ROMASANTA" }],
+["9706717", { name: "LLABORES, RAFAEL", department: "TSD-AE-ROMASANTA" }],
+["11027997", { name: "NORBE, JEROME", department: "TSD-AE-ROMASANTA" }],
+["4667912", { name: "ONCE, FLORENTINO JR.", department: "TSD-AE-ROMASANTA" }],
+["11069355", { name: "ROMASANTA, JULIO", department: "TSD-AE-ROMASANTA" }],
+["11029631", { name: "SAYSON, JIMMY", department: "TSD-AE-ROMASANTA" }],
+["9800072", { name: "ABAJAR, LITO", department: "TSD-HER-MORTEL" }],
+["9761881", { name: "ABAN, PITERSON", department: "TSD-HER-MORTEL" }],
+["3284389", { name: "AYOD, ELVARO", department: "TSD-HER-MORTEL" }],
+["14890687", { name: "CAPARINO, JERAMELL", department: "TSD-HER-MORTEL" }],
+["11029304", { name: "CORTEL, ARNOLD", department: "TSD-HER-MORTEL" }],
+["4673622", { name: "DIOGENES,ROLLY", department: "TSD-HER-MORTEL" }],
+["9761880", { name: "LACASANDILE, PEMIE", department: "TSD-HER-MORTEL" }],
+["11022449", { name: "LIM, WILLIVER", department: "TSD-HER-MORTEL" }],
+["11037198", { name: "LIM, WILNARD", department: "TSD-HER-MORTEL" }],
+["11022446", { name: "MANANES, RONRICO", department: "TSD-HER-MORTEL" }],
+["11029282", { name: "MORTEL, EDGAR", department: "TSD-HER-MORTEL" }],
+["9761882", { name: "RIOVEROS, RENATO", department: "TSD-HER-MORTEL" }],
+["10869084", { name: "RONQUILLO, FREDDIE A.", department: "TSD-HER-MORTEL" }],
+["3493029", { name: "AGUIL, SAMUEL", department: "TSD-LER-RIMANDO" }],
+["10877550", { name: "ASIAO, GEORGE", department: "TSD-LER-RIMANDO" }],
+["10894228", { name: "BABAN, RENIER", department: "TSD-LER-RIMANDO" }],
+["10897996", { name: "BARADE, JEFFREY", department: "TSD-LER-RIMANDO" }],
+["10894247", { name: "BELETA, MARLON", department: "TSD-LER-RIMANDO" }],
+["10876257", { name: "DANO, ARNEL", department: "TSD-LER-RIMANDO" }],
+["9776422", { name: "MABANSAG, NORIEL", department: "TSD-LER-RIMANDO" }],
+["9722362", { name: "OGHAYON, ALBERT", department: "TSD-LER-RIMANDO" }],
+["10894203", { name: "PAPASIN, ROLLY", department: "TSD-LER-RIMANDO" }],
+["10894225", { name: "SUMANOY, RICHARD", department: "TSD-LER-RIMANDO" }],
+["11035014", { name: "DANGANAN, GEORGE", department: "TSD-OFFICE" }],
+["1341467", { name: "MANTO, SARIMA", department: "TSD-OFFICE" }],
+["9761883", { name: "PERIA, RODEL RICK", department: "TSD-OFFICE" }],
+["9632571", { name: "PONCE DE LEON, MARK", department: "TSD-OFFICE" }],
+["9673969", { name: "ROA, ERIC ", department: "TSD-OFFICE" }],
+["4647249", { name: "TABARNILLA, BRIAN MARK", department: "TSD-OFFICE" }],
+["14890698", { name: "VILLAROSA, FERDINAND", department: "TSD-OFFICE" }],
+["9763057", { name: "ALAYON, RODEL JR.", department: "TSD-PMS-SOCRATES" }],
+["11012967", { name: "BENITO, ARGIE", department: "TSD-PMS-SOCRATES" }],
+["4661355", { name: "EDICA, DONNY", department: "TSD-PMS-SOCRATES" }],
+["10516473", { name: "IBNIL, MICHAEL", department: "TSD-PMS-SOCRATES" }],
+["10513996", { name: "LEPALAM, RODEL", department: "TSD-PMS-SOCRATES" }],
+["9776423", { name: "MACABUTAS, ROMART", department: "TSD-PMS-SOCRATES" }],
+["10904466", { name: "POTIAN, SALVADOR", department: "TSD-PMS-SOCRATES" }],
+["4666933", { name: "SAHIJOL, ETTOL", department: "TSD-PMS-SOCRATES" }],
+["10876250", { name: "SAIYO, VALERIANO", department: "TSD-PMS-SOCRATES" }],
+["15035289", { name: "SOCRATES, IVERSON", department: "TSD-PMS-SOCRATES" }],
+["11029675", { name: "SUPANGA, JUAN", department: "TSD-PMS-SOCRATES" }],
+["11029654", { name: "TILAON, JOEL", department: "TSD-PMS-SOCRATES" }],
+["11085222", { name: "BALLOS, GIL", department: "TSD-TIRE SHOP" }],
+["10894324", { name: "CALIWAG, GERALD GIL", department: "TSD-TIRE SHOP" }],
+["1369841", { name: "COMPESINO, ERNESTO", department: "TSD-TIRE SHOP-CALIWAG" }],
+["1361996", { name: "ELLA, MARLOU", department: "TSD-TIRE SHOP-CALIWAG" }],
+["1361997", { name: "MILLENDEZ, VIRGILIO", department: "TSD-TIRE SHOP-CALIWAG" }],
+["10504436", { name: "ORDIZ, ALLAN", department: "TSD-TIRE SHOP-CALIWAG" }],
+["9810619", { name: "BALANE, ALEXANDER JR.", department: "TSD-WF-DANGANAN" }],
+["5718914", { name: "BALBONTIN, JOEL", department: "TSD-WELDING FABRICATION" }],
+["4653034", { name: "BANTUG, GERALD", department: "TSD-WF-DANGANAN" }],
+["11012942", { name: "BICAR, ABDULRAUF", department: "TSD-WF-DANGANAN" }],
+["10876234", { name: "CATAGUE, TERRENCE", department: "TSD-WELDING FABRICATION" }],
+["10516450", { name: "DARAWIS, MOHAMMAD", department: "TSD-WF-DANGANAN" }],
+["11039785", { name: "DENZON, LENIEMOR", department: "TSD-WF-DANGANAN" }],
+["11039798", { name: "GUEVARRA, LEONINO", department: "TSD-WF-DANGANAN" }],
+["11029630", { name: "MARZAN, JOHNSON MARK", department: "TSD-WF-DANGANAN" }],
+["9722365", { name: "MUNAR, NUMERIANO", department: "TSD-WF-DANGANAN" }],
+["4662839", { name: "ORTIZ, ELMER", department: "TSD-WELDING FABRICATION" }],
+["11027970", { name: "ORTIZ, JAMES", department: "TSD-WELDING FABRICATION" }],
+["11032847", { name: "PALMES, KENNESON", department: "TSD-WF-DANGANAN" }],
+["11069341", { name: "PARAYAL, JUL-AHMAD", department: "TSD-WF-DANGANAN" }],
+["9706718", { name: "RODIL, RETCHIE", department: "TSD-WF-DANGANAN" }],
+["9806819", { name: "ALASKA, JUNEL", department: "WAREHOUSE" }],
+["3756770", { name: "AUSTIN, CHRISTOPHER", department: "WAREHOUSE" }],
+["5798231", { name: "BARDAGO, EZRA", department: "WAREHOUSE" }],
+["1328272", { name: "ESPEDIDO, BOBBY", department: "TRANSPORT" }],
+["3750227", { name: "GABAYNO, HERNAN", department: "WAREHOUSE" }],
+["10889812", { name: "GALIGAO, DARYL", department: "WAREHOUSE" }],
+["5790829", { name: "GALIGAO, JAY-AR", department: "WAREHOUSE" }],
+["3756512", { name: "GONZALES, CHRISTINE", department: "WAREHOUSE" }],
+["10890063", { name: "JARA, ARJAY", department: "WAREHOUSE" }],
+["5790851", { name: "LASAPIN, JOSE REY", department: "WAREHOUSE" }],
+["4642573", { name: "MAGALLANES, PHILIP REY", department: "WAREHOUSE" }],
+["9696114", { name: "MINA, JULIEN JOSEFINO", department: "WAREHOUSE" }],
+["9812168", { name: "PADRID, JIMMY", department: "WAREHOUSE" }],
+["10900405", { name: "REYES, JUCAS ADAM", department: "WAREHOUSE" }],
+["10898918", { name: "SACLUTI, MARLON", department: "WAREHOUSE" }],
+["5790842", { name: "VARGAS, HERNAN G. ", department: "WAREHOUSE" }],
+["10900464", { name: "VILLENA, RICHARD", department: "WAREHOUSE" }],
+["14246453", { name: "ORIENDO, JOEL", department: "MEPED" }],
+["6608819", { name: "COYCOY, DANNY BOY", department: "BENEFICIATION" }],
+["3425094", { name: "ANGCAL, JERIEL E", department: "ASSAY" }],
+["12097974", { name: "MOGA, RICHARD M.", department: "DRILLING AIDE GEOLOGY" }],
+["6600715", { name: "IDULOG, KENNETH", department: "EARTH BALLING HELPER MEPED" }],
+["6608526", { name: "PEREZ, JULIUS A.", department: "MEPED" }],
+["3419358", { name: "MENSORONG, JOSE S.", department: "MEPED" }],
+["9758851", { name: "TOLENTINO, REXON", department: "BENEFICIATION" }],
+["5807491", { name: "BARGOYO, MARK IAN", department: "GENERAL AFFAIRS" }],
+["3345709", { name: "DUMDUMAYA, JUNNIE", department: "GRADE CONTROL" }],
+["9763191", { name: "ABDURASID, SAIRAL", department: "BENEFICIATION-STANLY" }],
+["10487952", { name: "LLABORES, JOSEPH", department: "LIMONITE-BALMES" }],
+["6329161", { name: "TABOK, ROMMEL", department: "MEPED" }],
+["12129012", { name: "BARRAMEDA, MARK ERWIN", department: "PIT OPERATION" }],
+["9775960", { name: "MONDEJAR, JONE", department: "PIT OPERATION" }],
+["6598161", { name: "MADIAME, RASHEIL", department: "PIT-RAUL" }],
+["12145093", { name: "CAYAO, GILBERT", department: "BENEFICIATION-STANLY" }],
+["6597738", { name: "GENON, GILBERT", department: "BENEFICIATION-STANLY" }],
+["6622797", { name: "ASCARI, JOEL", department: "LIMONITE-JEHU" }],
+["12112118", { name: "CORDOVA, EROL", department: "LIMONITE" }],
+["15029255", { name: "DIALIKIN, DILIUS", department: "LIMONITE" }],
+["3350998", { name: "PERALTA, JUVER", department: "SURVEY" }],
+["12146010", { name: "RUBIA, RODEL", department: "GEOLOGY-DRILING-JONAS" }],
+["6600419", { name: "MENSORONG, BENZON", department: "MEPED" }],
+["6608474", { name: "MANAOIS, RAE SHEENA", department: "MINE DIVISION-OFFICE" }],
+["12093209", { name: "SIBUYAN, AYAN", department: "BENEFICIATION" }],
+["9763191", { name: "SAIRAL, ABDIRASID", department: "BARGE LOADING-MADRID" }],
+["6597721", { name: "SEDOTES, ARJEHL", department: "MEPED" }],
+["14267413", { name: "BALIGUAT, KING NICKHON", department: "GRADE CONTROL" }],
+["6608505", { name: "DOCENA, VENZ ANTHONY", department: "PURCHASING" }],
+["3422301", { name: "BARTOLOME, VIRGILIO", department: "MEPED" }],
+["6608496", { name: "GANGANO, STEPHANIE", department: "ENGINEERING" }],
+["6608439", { name: "SUMANOY, RICA", department: "ASSAY" }],
+["6612855", { name: "CASA, KEN ANGELO", department: "LIMONITE-BAIROY" }],
+["1379085", { name: "VIZON, EDELINA ", department: "GENERAL AFFAIRS" }],
+["6612826", { name: "ARAGDON, RODERICK", department: "MEPED" }],
+["6598117", { name: "ABDULLA, ASANI", department: "LIMONITE-BALMES" }],
+["6598139", { name: "CORTEL, ARWIN", department: "LIMONITE-BALMES" }],
+["6597708", { name: "FACUN, REY CARMELO", department: "LIMONITE-BAIROY" }],
+["6597707", { name: "RIVERO, MICHAEL", department: "LIMONITE-BAIROY" }],
+["6600651", { name: "ORDONEZ, PHILIP MARK", department: "BENEFICIATION-STANLY" }],
+["3335681", { name: "TABI, RENATO", department: "MEPED" }],
+["6597729", { name: "JANE JASMIN AQUINO", department: "MINE ENGINEERING" }],
+["6600660", { name: "LANZADERAS, IRIS", department: "MINE ENGINEERING" }],
+["9763191", { name: "ABDURASID, SAIRAL MADJALANE", department: "BARGE LOADING-MADRID" }],
+["6597686", { name: "FERNANDEZ, BEBERLIE", department: "ASSAY" }],
+["6608426", { name: "TINGCATAN, JEGAR", department: "DRILLING AIDE GEOLOGY" }],
+["6608835", { name: "GAMAYON, EUGENIO III", department: "DRILLING AIDE GEOLOGY" }],
+["6608832", { name: "VILLARUZ, BRYAN", department: "DRILLING AIDE GEOLOGY" }],
+["6608813", { name: "SUMIBAY, REX", department: "DRILLING AIDE GEOLOGY" }],
+["6608509", { name: "URDELAS, OLIVER", department: "GEOLOGY-DRILING" }],
+["6608421", { name: "INDAL, JAMAL", department: "GEOLOGY-DRILING" }],
+["6600673", { name: "MAGNO, ARGIE", department: "GEOLOGY-DRILING" }],
+["6612833", { name: "HERMOGENES, RANEGO", department: "MEPED" }],
+["6608514", { name: "TANQUERIDO, RAMIE", department: "GEOLOGY-DRILLING" }],
+["6608470", { name: "MAQUILING, JENNAFE", department: "ASSAY" }],
+["6608448", { name: "MANZANO, CHARMLEY", department: "PSCM" }],
+["6635008", { name: "MADJAME, MICHAEL", department: "GEOLOGY-DRILING" }],
+["6608814", { name: "ALINSANGAO, EDELINA M.", department: "GENERAL AFFAIRS" }],
+["6634508", { name: "JAHAR, EDWIN-NEW", department: "GRADE CONTROL" }],
+["11060343", { name: "ALONSO, ERNESTO", department: "CAMP MAINTENANCE" }],
+["6608518", { name: "CANAMAQUE, KRYZTLE", department: "COMREL" }],
+["6634804", { name: "VERZOLA, OGILCIS G.", department: "SAFETY" }],
+["6608482", { name: "SIPLAN, JULBERT", department: "MEPED" }],
+["6612848", { name: "TAIBBON, SANNYBON", department: "MEPED" }],
+["6600717", { name: "GURA, RECKEY", department: "MEPED" }],
+["6634781", { name: "CERRO, ELMARC", department: "DRILLING AIDE GEOLOGY" }],
+["6634501", { name: "MASTALANI, LEONARDO", department: "MEPED" }],
+["6608492", { name: "HILARIO, JOHN REI", department: "PSCM" }],
+["6634574", { name: "BAYOT, ROGER", department: "SURVEY" }],
+["6634567", { name: "PASIGUA, RAFFY", department: "DRILLING AIDE GEOLOGY" }],
+["6634759", { name: "EUPENA, FERDIHIL", department: "drilling" }],
+["6634545", { name: "FORENES, PEDRO", department: "DRILLING AIDE GEOLOGY" }],
+["12096771", { name: "VILLAR, RONIEL JR.", department: "PIT OPERATION" }],
+["6613171", { name: "BERNARDINO, DANIEL", department: "GEOLOGY-DRILING" }],
+["6608831", { name: "MAGNO, BRYAN", department: "DRILLING AIDE GEOLOGY" }],
+["6634803", { name: "LASAPIN, RICHARD", department: "COMREL" }],
+["6608497", { name: "SAMILO, PHILIP", department: "EARTH BALLING HELPER MEPED" }],
+["6608504", { name: "SAMILO, EMER", department: "EARTH BALLING HELPER MEPED" }],
+["6600421", { name: "SIPLAN, JULIUS", department: "MEPED" }],
+["5884877", { name: "GAMAL, MARCELO G.", department: "MEPED" }],
+["3326125", { name: "ROMANAHN, ALBERT", department: "GEOLOGY-DRILING" }],
+["6612827", { name: "MARANAN, REYNALD M.", department: "MEPED" }],
+["6612849", { name: "TUCANG, CARLITO E.", department: "DRILLING" }],
+["6612832", { name: "VILLARUZ, SEAN CYNDY", department: "GEOLOGY-DRILING" }],
+["6613213", { name: "MASENDO, BRYAN", department: "MEPED" }],
+["6597406", { name: "TINGCATAN, NORLITO", department: "BENEFICIATION-ROMEL" }],
+["3389234", { name: "URDELAS, GARY", department: "LIMONITE-BALMES" }],
+["6608531", { name: "MILITAR, RAYMOND", department: "PSCM" }],
+["6597420", { name: "ANTARA, JERLAN", department: "MEPED" }],
+["6597744", { name: "ALTERADO, CLARK", department: "MEPED" }],
+["6600924", { name: "CALAMPISI, RENREN", department: "MEPED" }],
+["6597722", { name: "BALLENA, LENARD", department: "MEPED" }],
+["6597715", { name: "ABLAN, JIMBOY", department: "MEPED" }],
+["6634501", { name: "MASTALANI, LEONARDO", department: "MEPED" }],
+["6597398", { name: "CABOTEJA, ELMER", department: "MEPED" }],
+["6597656", { name: "TINGCATAN, NELITO", department: "MEPED" }],
+["6613230", { name: "HERMINO, RONILLO", department: "MEPED" }],
+["6597376", { name: "COLUBONG, DENNIS", department: "MEPED" }],
+["6600946", { name: "TINGCATAN, ALVIN", department: "MEPED" }],
+["6598136", { name: "OSA, JAYSON", department: "MEPED" }],
+["6627832", { name: "COLLADO, MARK RIO", department: "MEPED" }],
+["6627899", { name: "MARTINEZ, RENE", department: "MEPED" }],
+["6627920", { name: "LLANARIZAS, MARK ANTHONY", department: "MEPED" }],
+["6597649", { name: "HUMANTOC, REY", department: "MEPED" }],
+["6627876", { name: "ANECITO, EFREN", department: "MEPED" }],
+["6597678", { name: "RANSARAN, JERIC", department: "MEPED" }],
+["6584581", { name: "ADJUHOD, HARREL", department: "MEPED" }],
+["6627855", { name: "GARUDA, ANJATUN", department: "MEPED" }],
+["1376087", { name: "ARINEZ, ARJAYE", department: "PIT OPERATION" }],
+["6627877", { name: "GAMAL, RAYMOND", department: "MEPED" }],
+["6627789", { name: "MERSAG, RICHARD", department: "MEPED" }],
+["14245460", { name: "TALAME, ELEAZAR", department: "MEPED" }],
+["6627854", { name: "GANDARI, MALVER", department: "GENERAL AFFAIRS" }],
+["6635001", { name: "LONTES, LEONARD JOSEPH", department: "DRILLING" }],
+["6613228", { name: "YUSOP, SALIE", department: "GEOLOGY-DRILING" }],
+["6612810", { name: "OLANO, ERROL JAKE", department: "MEPED" }],
+["6613169", { name: "RUFLO, ANSEL", department: "CPFMS" }],
+["6627810", { name: "PENAS, FRANCIS", department: "MEPED" }],
+["6613186", { name: "DE CASTRO, RAYMOND", department: "CPFMS" }],
+["6613184", { name: "ICAY, TEDDY REY", department: "MEPED" }],
+["6597648", { name: "PORSA, DANNY BOY", department: "MEPED" }],
+["6600629", { name: "ADAN, NOFREL", department: "MEPED" }],
+["6608817", { name: "RINTAYA, APRIL BOY", department: "MEPED" }],
+["6613191", { name: "TANOG, ARSEDIE", department: "MEPED" }],
+["6613208", { name: "TANOG, ALPIE B.", department: "MEPED" }],
+["9763207", { name: "MOHAMMAD, ABDULHASAN S.", department: "MRRU" }],
+["6597392", { name: "BARRAMEDA, BJ", department: "MEPED" }],
+["6597407", { name: "ARBIGOSO, DEXTER C.", department: "MEPED" }],
+["6305211", { name: "BARRAMEDA, ARJAY LARINCE", department: "LIMONITE" }],
+["6597671", { name: "URDELAS, RENOLD", department: "MEPED" }],
+["3314351", { name: "URDELAS, JOBERT SON", department: "GEOLOGY-DRILING" }],
+["3328829", { name: "SABINO, JOPITO", department: "MEPED" }],
+["3381287", { name: "ASAN, ALMARK", department: "GEOLOGY-DRILING" }],
+["6608465", { name: "FERRER, ESTRELIETA", department: "MEPED" }],
+["12096162", { name: "SARAN, NURUEL", department: "PIT OPERATION" }],
+["12145233", { name: "EPOK, ARIEL", department: "PIT OPERATION" }],
+["6597693", { name: "TUKAR, ADEL", department: "MEPED" }],
+["6627943", { name: "SIPLAN, SAMSON", department: "MEPED" }],
+["6597385", { name: "PALASIGUE, STEVEN", department: "MEPED" }],
+["6600704", { name: "GIPAYA, ARJED", department: "MEPED" }],
+["11027237", { name: "LLACUNA, ADRES", department: "PIT OPERATION" }],
+["15036423", { name: "ALEJANDRO, MARK", department: "GRADE CONTROL" }],
+["3344273", { name: "DELA PEÑA, JESSIE", department: "GRADE CONTROL" }],
+["11043894", { name: "UBUGAN, CHRISTOPHER", department: "GRADE CONTROL" }],
+["6608839", { name: "SEGOVIA, NONITO JR.", department: "GRADE CONTROL" }],
+    ]);
+    let attendanceRecords = [];
+    let allDepartments = [];
+
+
+    /*******************************
+     * DOM refs
+     *******************************/
+    const employeeIdInput = document.getElementById('employeeIdInput');
+    const attendanceCard = document.getElementById('attendanceCard');
+    const resultCard = document.getElementById('resultCard');
+    const resultName = document.getElementById('resultName');
+    const resultDepartment = document.getElementById('resultDepartment');
+    const resultDateTime = document.getElementById('resultDateTime');
+    const resultStatus = document.getElementById('resultStatus');
+    const attendanceTableBody = document.getElementById('attendanceBody');
+    const extractBtn = document.getElementById('extractBtn');
+    const recordAttendanceBtn = document.getElementById('recordAttendanceBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const noRecordsMessage = document.getElementById('noRecordsMessage');
+    const currentDateTimeDisplay = document.getElementById('currentDateTime');
+    const confirmModal = document.getElementById('confirmModal');
+    const confirmClearBtn = document.getElementById('confirmClearBtn');
+    const cancelClearBtn = document.getElementById('cancelClearBtn');
+    const employeeDataUpload = document.getElementById('employeeDataUpload');
+    const employeeSearchInput = document.getElementById('employeeSearchInput');
+    const employeeSuggestions = document.getElementById('employeeSuggestions');
+    const searchResultCard = document.getElementById('searchResultCard');
+    const searchResultName = document.getElementById('searchResultName');
+    const searchResultId = document.getElementById('searchResultId');
+    const searchResultDepartment = document.getElementById('searchResultDepartment');
+    const fileProtocolOverlay = document.getElementById('fileProtocolOverlay');
+    const continueAnywayBtn = document.getElementById('continueAnyway');
+    const totalScannedDisplay = document.getElementById('totalScanned');
+
+    let lastLogTime = 0;
+    const logCooldown = 1000;
+
+    /*******************************
+     * Date/time
+     *******************************/
+    function updateDateTime() {
+        const now = new Date();
+        const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit', hour12: true };
+        currentDateTimeDisplay.textContent = `Current time: ${now.toLocaleDateString('en-US', options)}`;
+    }
+    setInterval(updateDateTime, 1000);
+
+    /*******************************
+     * Storage helpers: load/save
+     *******************************/
+    function loadData() {
+        try {
+            const rawEmployees = storage.getItem(EMPLOYEE_DATA_KEY);
+            if (rawEmployees) {
+                try {
+                    employeeData = new Map(JSON.parse(rawEmployees));
+                } catch (e) { /* use default map */ }
+            }
+            const rawAttendance = storage.getItem(ATTENDANCE_RECORDS_KEY);
+            attendanceRecords = rawAttendance ? JSON.parse(rawAttendance) : [];
+            allDepartments = [...new Set(Array.from(employeeData.values()).map(emp => emp.department))].sort();
+            refreshAttendanceTable();
+            countTableRows(false);
+        } catch (e) { /* error handling */ }
+    }
+
+    function saveData() {
+        try {
+            storage.setItem(EMPLOYEE_DATA_KEY, JSON.stringify(Array.from(employeeData.entries())));
+            storage.setItem(ATTENDANCE_RECORDS_KEY, JSON.stringify(attendanceRecords));
+        } catch (e) { /* error handling */ }
+    }
+
+    /*******************************
+     * Table & records helpers
+     *******************************/
+    function countTableRows(save=true) {
+        totalScannedDisplay.textContent = attendanceRecords.length;
+        if (save) saveData();
+    }
+
+    function addAttendanceRow(record) {
+        const row = attendanceTableBody.insertRow(0);
+        row.classList.add('hover:bg-gray-50');
+        row.innerHTML = `
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${record.employeeId}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${record.name}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${record.department}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${record.time}</td>
+        `;
+    }
+
+    function refreshAttendanceTable() {
+        attendanceTableBody.innerHTML = '';
+        if (!attendanceRecords || attendanceRecords.length === 0) {
+            if (noRecordsMessage) noRecordsMessage.classList.remove('hidden');
+        } else {
+            if (noRecordsMessage) noRecordsMessage.classList.add('hidden');
+            attendanceRecords.forEach(record => addAttendanceRow(record));
+        }
+    }
+
+    // *** MODIFIED CORE FUNCTION ***
+    function recordAttendance(employeeId, employee) {
+        const now = new Date();
+        const date = now.toLocaleDateString('en-US');
+        const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+
+        const newRecord = {
+            employeeId: employeeId,
+            name: employee.name,
+            department: employee.department,
+            date: date,
+            time: time
+        };
+
+        attendanceRecords.unshift(newRecord);
+        addAttendanceRow(newRecord);
+        saveData();
+
+        displayResult(employee.name, employee.department, `${date} at ${time}`);
+        
+        employeeIdInput.value = '';
+        employeeIdInput.focus();
+        countTableRows();
+    }
+    
+    /*******************************
+     * Visual helpers
+     *******************************/
+    function displayResult(name, department, datetime) {
+        if (!resultCard) return;
+        resultCard.classList.remove('hidden');
+        resultCard.classList.add('fade-in', 'border-green-500'); // Ensure border is green for success
+        resultName.textContent = name;
+        resultDepartment.textContent = department;
+        resultDateTime.textContent = datetime;
+        resultStatus.textContent = 'LOGGED';
+        resultStatus.className = `text-8xl font-extrabold pulse text-green-600`;
+    }
+
+    function displayError(message) {
+        if (!resultCard) return;
+        resultCard.classList.remove('hidden');
+        resultCard.classList.add('fade-in', 'border-red-500');
+        resultName.textContent = message;
+        resultDepartment.textContent = '';
+        resultDateTime.textContent = new Date().toLocaleTimeString();
+        resultStatus.textContent = 'ERROR';
+        resultStatus.className = `text-8xl font-extrabold text-gray-500`;
+        employeeIdInput.focus();
+    }
+
+    function hideSearch() {
+        searchResultCard.classList.add('hidden');
+    }
+
+    /*******************************
+     * Attendance input handling (Simplified)
+     *******************************/
+    recordAttendanceBtn.addEventListener('click', () => {
+        const now = Date.now();
+        if (now - lastLogTime < logCooldown) {
+            console.warn("Log recorded too quickly. Ignoring duplicate.");
+            return;
+        }
+        lastLogTime = now;
+
+        const employeeId = employeeIdInput.value.trim();
+
+        if (!employeeId) {
+            displayError("Employee ID is required.");
+            return;
+        }
+
+        const employee = employeeData.get(employeeId);
+
+        if (employee) {
+            recordAttendance(employeeId, employee);
+        } else {
+            displayError(`Employee ID ${employeeId} Not Found. Please upload the employee list.`);
+        }
+    });
+
+    // Handle Enter keypress (for RFID/scanner input)
+    employeeIdInput.addEventListener('keyup', (event) => {
+        if (event.key === 'Enter' || event.keyCode === 13) {
+            recordAttendanceBtn.click();
+        }
+    });
+
+    /*******************************
+     * Employee Search Logic (Unchanged but simplified context)
+     *******************************/
+    employeeSearchInput.addEventListener('input', () => {
+        const query = employeeSearchInput.value.trim().toUpperCase();
+        employeeSuggestions.innerHTML = '';
+        employeeSuggestions.classList.add('hidden');
+        searchResultCard.classList.add('hidden');
+
+        if (query.length < 2) return;
+
+        let foundEmployees = [];
+        employeeData.forEach((employee, id) => {
+            if (id.includes(query) || employee.name.includes(query)) {
+                foundEmployees.push({ id, name: employee.name, department: employee.department });
+            }
+        });
+
+        if (foundEmployees.length > 0) {
+            foundEmployees.slice(0, 5).forEach(emp => {
+                const li = document.createElement('li');
+                li.className = 'autocomplete-list-item text-sm text-gray-700 hover:bg-blue-50';
+                li.textContent = `${emp.id} - ${emp.name} (${emp.department})`;
+                li.addEventListener('click', () => {
+                    employeeIdInput.value = emp.id;
+                    employeeSearchInput.value = '';
+                    employeeSuggestions.classList.add('hidden');
+                    // Display details in the card
+                    searchResultName.textContent = emp.name;
+                    searchResultId.textContent = emp.id;
+                    searchResultDepartment.textContent = emp.department;
+                    searchResultCard.classList.remove('hidden');
+                    employeeIdInput.focus();
+                });
+                employeeSuggestions.appendChild(li);
+            });
+            employeeSuggestions.classList.remove('hidden');
+        }
+    });
+
+    /*******************************
+     * CSV Export Logic (Unchanged)
+     *******************************/
+    extractBtn.addEventListener('click', () => {
+        if (attendanceRecords.length === 0) {
+            alert("No attendance records to export.");
+            return;
+        }
+
+        let csv = 'ID,Name,Department,Date,Time\n';
+        attendanceRecords.forEach(record => {
+            csv += `${record.employeeId},"${record.name}","${record.department}",${record.date},${record.time}\n`;
+        });
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        
+        const now = new Date();
+        const dateStr = now.toISOString().split('T')[0];
+        
+        if (link.download !== undefined) { 
+            link.setAttribute('href', URL.createObjectURL(blob));
+            link.setAttribute('download', `AttendanceLog_${dateStr}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } else {
+            // Fallback for browsers (like some iOS versions) that don't fully support download attribute
+            alert("Please copy the following data:\n\n" + csv);
+        }
+    });
+
+    /*******************************
+     * Clear Log Logic (Unchanged)
+     *******************************/
+    resetBtn.addEventListener('click', () => {
+        confirmModal.style.display = 'flex';
+    });
+
+    cancelClearBtn.addEventListener('click', () => {
+        confirmModal.style.display = 'none';
+    });
+
+    confirmClearBtn.addEventListener('click', () => {
+        attendanceRecords = [];
+        storage.removeItem(ATTENDANCE_RECORDS_KEY);
+        refreshAttendanceTable();
+        countTableRows(false);
+        confirmModal.style.display = 'none';
+        alert("Attendance log cleared successfully.");
+    });
+    
+    /*******************************
+     * Employee Data Upload Logic (Unchanged)
+     *******************************/
+    employeeDataUpload.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = JSON.parse(e.target.result);
+                // Ensure data is an array of [ID, {name, department}]
+                if (Array.isArray(data) && data.every(item => Array.isArray(item) && item.length === 2 && typeof item[0] === 'string' && typeof item[1] === 'object')) {
+                    const newMap = new Map(data);
+                    if (newMap.size > 0) {
+                        employeeData = newMap;
+                        saveData();
+                        alert(`Successfully loaded ${employeeData.size} employee records!`);
+                        
+                        // Clear the input file value to allow re-uploading the same file
+                        event.target.value = ''; 
+                    } else {
+                        throw new Error("Loaded file contains no valid employee records.");
+                    }
+                } else {
+                    throw new Error("Invalid JSON/JS format. Expected an array of [ID, {name: '...', department: '...'}] entries.");
+                }
+            } catch (error) {
+                alert(`Error loading employee data: ${error.message}. Ensure the file is valid JSON/JS.`);
+            }
+        };
+        reader.readAsText(file);
+    });
+
+    /*******************************
+     * Initialization and iOS check
+     *******************************/
+    function init() {
+        updateDateTime();
+        loadData();
+        employeeIdInput.focus();
+        
+        if (window.location.protocol === 'file:') {
+            fileProtocolOverlay.style.display = 'flex';
+            continueAnywayBtn.addEventListener('click', () => {
+                fileProtocolOverlay.style.display = 'none';
+            });
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', init);
+    
+    // Auto-hide search card when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!employeeSearchInput.contains(e.target) && !employeeSuggestions.contains(e.target)) {
+            employeeSuggestions.classList.add('hidden');
+        }
+    });
+    </script>
+</body>
+</html>
